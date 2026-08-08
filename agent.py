@@ -307,6 +307,7 @@ class Agent:
 
         self.neighbors = []
         self.neighborhood = []
+        self.movementNeighborhood = []
         for disease in self.diseases:
             diseaseRecord = disease["disease"]
             diseaseRecord.recover(self)
@@ -384,7 +385,7 @@ class Agent:
         livingDaughters = []
         livingFriends = []
         for child in self.socialNetwork["children"]:
-            if child.isAlive() == True:
+            if self.isEntryAlive(child) == True:
                 livingChildren.append(child)
                 childSex = child.sex
                 if childSex == "male":
@@ -392,7 +393,7 @@ class Agent:
                 elif childSex == "female":
                     livingDaughters.append(child)
         for friend in self.socialNetwork["friends"]:
-            if friend["friend"].isAlive() == True:
+            if self.isEntryAlive(friend["friend"]) == True:
                 livingFriends.append(friend["friend"])
 
         if self.inheritancePolicy == "children" and len(livingChildren) > 0:
@@ -572,6 +573,7 @@ class Agent:
             # Bookkeeping before performing actions
             self.lastSugar = self.sugar
             self.lastSpice = self.spice
+            self.pruneDeadReferences()
             # Beginning of timestep actions
             self.moveToBestCell(predeterminedMove)
             self.updateNeighbors()
@@ -937,10 +939,13 @@ class Agent:
                 emptyCells.append(neighborCell)
         return emptyCells
 
+    def findEntryID(self, entry):
+        return entry.ID if isinstance(entry, Agent) else entry
+
     def findFamilyHappiness(self):
         familyHappiness = 0
         for child in self.socialNetwork["children"]:
-            if child.isAlive() == True:
+            if self.isEntryAlive(child) == True:
                 familyHappiness += self.happinessUnit
                 if child.isSick() == True:
                     familyHappiness -= self.happinessUnit * 0.5
@@ -949,7 +954,7 @@ class Agent:
             else:
                 familyHappiness -= self.happinessUnit
         for mate in self.socialNetwork["mates"]:
-            if mate.isAlive() == True:
+            if self.isEntryAlive(mate) == True:
                 familyHappiness += self.happinessUnit
                 if mate.isSick() == True:
                     familyHappiness -= self.happinessUnit * 0.5
@@ -1241,6 +1246,9 @@ class Agent:
             return True
         return False
 
+    def isEntryAlive(self, entry):
+        return isinstance(entry, Agent) and entry.isAlive()
+
     def isFertile(self):
         if self.sugar >= self.startingSugar and self.spice >= self.startingSpice and self.age >= self.fertilityAge and self.age < self.infertilityAge and (self.fertilityFactor + self.fertilityFactorModifier) > 0:
             return True
@@ -1364,8 +1372,7 @@ class Agent:
         creditorChildren = creditor.socialNetwork["children"]
         livingCreditorChildren = []
         for child in creditorChildren:
-            # Children who took loans out with their parents should not owe themselves
-            if child != self and child.isAlive() == True:
+            if child != self and self.isEntryAlive(child) == True:
                 livingCreditorChildren.append(child)
         numLivingChildren = len(livingCreditorChildren)
         if numLivingChildren > 0:
@@ -1442,6 +1449,29 @@ class Agent:
         self.updateMovementStats(rankedCells)
         return rankedCells
 
+    def pruneDeadReferences(self):
+        father = self.socialNetwork["father"]
+        if isinstance(father, Agent) and father.isAlive() == False:
+            self.socialNetwork["father"] = father.ID
+        mother = self.socialNetwork["mother"]
+        if isinstance(mother, Agent) and mother.isAlive() == False:
+            self.socialNetwork["mother"] = mother.ID
+
+        children = self.socialNetwork["children"]
+        for i, child in enumerate(children):
+            if isinstance(child, Agent) and child.isAlive() == False:
+                children[i] = child.ID
+
+        mates = self.socialNetwork["mates"]
+        for i, mate in enumerate(mates):
+            if isinstance(mate, Agent) and mate.isAlive() == False:
+                mates[i] = mate.ID
+
+        for friend in self.socialNetwork["friends"]:
+            friendAgent = friend["friend"]
+            if isinstance(friendAgent, Agent) and friendAgent.isAlive() == False:
+                friend["friend"] = friendAgent.ID
+
     def removeDebt(self, loan):
         for debtor in self.socialNetwork["debtors"]:
             if debtor == loan:
@@ -1507,7 +1537,7 @@ class Agent:
             maxDifferenceFriend = None
             for friend in self.socialNetwork["friends"]:
                 # If already a friend, update Hamming Distance
-                if friend["friend"].ID == neighborID:
+                if self.findEntryID(friend["friend"]) == neighborID:
                     self.socialNetwork["friends"].remove(friend)
                     self.socialNetwork["friends"].append(neighborEntry)
                     return
