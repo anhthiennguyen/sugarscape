@@ -23,7 +23,7 @@ class GUI:
         self.minVision = sugarscape.configuration["agentVision"][0]
         self.maxVision = sugarscape.configuration["agentVision"][1]
         visionColors = self.findColorRange("#FF0000", "#00FF00", self.minVision, self.maxVision)
-        self.colors = {"sugarAndSpice": sugarAndSpiceColors, "pollution": pollutionColors, "healthy": "#3232FA", "sick": "#FA3232", "metabolism": metabolismColors, "movement": movementColors, "noSex": "#FA3232", "female": "#FA32FA", "male": "#3232FA", "vision": visionColors}
+        self.colors = {"sugarAndSpice": sugarAndSpiceColors, "pollution": pollutionColors, "claimed": "#C87850", "healthy": "#3232FA", "sick": "#FA3232", "metabolism": metabolismColors, "movement": movementColors, "noSex": "#FA3232", "female": "#FA32FA", "male": "#3232FA", "vision": visionColors}
         self.palette = ["#FA3232", "#3232FA", "#32FA32", "#32FAFA", "#FA32FA", "#AA3232", "#3232AA", "#32AA32", "#32AAAA", "#AA32AA", "#FA8800", "#00FA88", "#8800FA", "#FA8888", "#8888FA", "#88FA88", "#FA3288", "#3288FA", "#88FA32", "#AA66AA", "#66AAAA", "#3ED06E", "#6E3ED0", "#D06E3E", "#000000"]
         numTribes = self.sugarscape.configuration["environmentMaxTribes"]
         numDecisionModels = len(self.sugarscape.configuration["agentDecisionModels"])
@@ -215,7 +215,7 @@ class GUI:
             self.highlightCell(self.highlightedCell)
 
     def configureEnvironmentColorNames(self):
-        return ["Pollution"]
+        return ["Land Claims", "Pollution"]
 
     def configureGraph(self):
         self.updateGraphDimensions()
@@ -658,6 +658,11 @@ class GUI:
         if agent == None:
             if self.activeColorOptions["environment"] == "Pollution":
                 return self.colors["pollution"][min(round(cell.pollution), 20)]
+            elif self.activeColorOptions["environment"] == "Land Claims":
+                baseColor = self.colors["sugarAndSpice"][cell.sugar][cell.spice]
+                if getattr(cell, "owner", None) != None:
+                    return self.intToHex(self.interpolateColor(self.hexToInt(baseColor), self.hexToInt(self.colors["claimed"]), 0.5))
+                return baseColor
             else:
                 return self.colors["sugarAndSpice"][cell.sugar][cell.spice]
 

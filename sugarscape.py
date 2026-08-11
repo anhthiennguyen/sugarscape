@@ -232,6 +232,8 @@ class Sugarscape:
                 a.selfishnessFactor = -1
             elif "temperance" in agentConfiguration["decisionModel"]:
                 a = ethics.Temperance(agentID, self.timestep, placementCell, agentConfiguration)
+            elif "locke" in agentConfiguration["decisionModel"]:
+                a = ethics.Locke(agentID, self.timestep, placementCell, agentConfiguration)
 
             # If dynamic selfishness is desired but not defined, give a small degree of dynamic selfishness
             if "Dynamic" in agentConfiguration["decisionModel"] and self.configuration["agentDynamicSelfishnessFactor"] == [0.0, 0.0]:
@@ -1909,6 +1911,7 @@ if __name__ == "__main__":
                      "environmentFile": None,
                      "environmentHeight": 50,
                      "environmentInGroupRaces": [],
+                     "environmentLandDecayTimesteps": 50,
                      "environmentMaxCombatLoot": 0,
                      "environmentMaxRaces": 0,
                      "environmentMaxSpice": 0,
