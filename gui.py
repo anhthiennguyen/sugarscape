@@ -660,7 +660,7 @@ class GUI:
                 return self.colors["pollution"][min(round(cell.pollution), 20)]
             elif self.activeColorOptions["environment"] == "Land Claims":
                 baseColor = self.colors["sugarAndSpice"][cell.sugar][cell.spice]
-                if getattr(cell, "owner", None) != None:
+                if len(getattr(cell, "owners", {})) > 0:
                     return self.intToHex(self.interpolateColor(self.hexToInt(baseColor), self.hexToInt(self.colors["claimed"]), 0.5))
                 return baseColor
             else:

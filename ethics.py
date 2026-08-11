@@ -552,15 +552,27 @@ class Temperance(agent.Agent):
 class Locke(agent.Agent):
     def __init__(self, agentID, birthday, cell, configuration):
         super().__init__(agentID, birthday, cell, configuration)
-        self.locke = {"claims": [], "violations": [], "debtsReceivable": []}
+        self.locke = {"claims": [], "debtsReceivable": []}
 
-    def cellOwner(self, cell):
-        return getattr(cell, "owner", None)
+    def cellOwners(self, cell):
+        if not hasattr(cell, "owners"):
+            cell.owners = {}
+        return cell.owners
 
     def cellConsentedAgents(self, cell):
         if not hasattr(cell, "consentedAgents"):
             cell.consentedAgents = set()
         return cell.consentedAgents
+
+    def cellConsentApprovals(self, cell):
+        if not hasattr(cell, "consentApprovals"):
+            cell.consentApprovals = {}
+        return cell.consentApprovals
+
+    def cellPendingViolations(self, cell):
+        if not hasattr(cell, "pendingViolations"):
+            cell.pendingViolations = []
+        return cell.pendingViolations
 
     def agentLandDebtsOwed(self, agent):
         if not hasattr(agent, "landDebtsOwed"):
@@ -568,29 +580,32 @@ class Locke(agent.Agent):
         return agent.landDebtsOwed
 
     def claimCellFor(self, cell, owner):
-        cell.owner = owner
+        cell.owners = {owner: 1.0}
         cell.lastHarvestedTimestep = owner.timestep
         cell.consentedAgents = set()
+        cell.consentApprovals = {}
 
     def forfeitCellClaim(self, cell):
-        cell.owner = None
+        cell.owners = {}
         cell.lastHarvestedTimestep = -1
         cell.consentedAgents = set()
+        cell.consentApprovals = {}
 
-    def convertViolationsToDebts(self, owner, cell, timestep):
-        remainingViolations = []
-        for violation in owner.locke["violations"]:
-            if violation["cell"] != cell:
-                remainingViolations.append(violation)
-                continue
+    def convertViolationsToDebts(self, cell, timestep):
+        owners = self.cellOwners(cell)
+        for violation in self.cellPendingViolations(cell):
             trespasser = violation["trespasser"]
-            debt = {"creditor": owner, "debtor": trespasser, "cell": cell,
-                    "amount": violation["amount"], "createdTimestep": timestep}
-            owner.locke["debtsReceivable"].append(debt)
-            self.agentLandDebtsOwed(trespasser).append(debt)
-            if "all" in owner.debug or "agent" in owner.debug:
-                print(f"Agent {owner.ID} converts trespass by Agent {trespasser.ID} on ({cell.x},{cell.y}) into a debt of {round(debt['amount'], 2)}")
-        owner.locke["violations"] = remainingViolations
+            for owner, share in owners.items():
+                debtAmount = violation["amount"] * share
+                if debtAmount <= 0:
+                    continue
+                debt = {"creditor": owner, "debtor": trespasser, "cell": cell,
+                        "amount": debtAmount, "createdTimestep": timestep}
+                owner.locke["debtsReceivable"].append(debt)
+                self.agentLandDebtsOwed(trespasser).append(debt)
+                if "all" in owner.debug or "agent" in owner.debug:
+                    print(f"Agent {owner.ID} converts trespass by Agent {trespasser.ID} on ({cell.x},{cell.y}) into a debt of {round(debtAmount, 2)} ({round(share * 100, 1)}% share)")
+        cell.pendingViolations = []
 
     def removeSettledDebt(self, debt):
         creditor = debt["creditor"]
@@ -601,12 +616,17 @@ class Locke(agent.Agent):
         if debt in owedList:
             owedList.remove(debt)
 
-    def transferLand(self, cell, previousOwner, newOwner):
+    def transferShare(self, cell, previousOwner, newOwner):
+        owners = self.cellOwners(cell)
+        if previousOwner not in owners:
+            return
+        self.convertViolationsToDebts(cell, self.timestep)
+        share = owners.pop(previousOwner)
         if cell in previousOwner.locke["claims"]:
             previousOwner.locke["claims"].remove(cell)
-        self.convertViolationsToDebts(previousOwner, cell, previousOwner.timestep)
-        self.claimCellFor(cell, newOwner)
-        newOwner.locke["claims"].append(cell)
+        owners[newOwner] = owners.get(newOwner, 0) + share
+        if cell not in newOwner.locke["claims"]:
+            newOwner.locke["claims"].append(cell)
 
     def acquireLandClaim(self, cell):
         self.claimCellFor(cell, self)
@@ -620,39 +640,41 @@ class Locke(agent.Agent):
         spiceHarvested = cell.spice
         super().collectResourcesAtCell()
 
-        owner = self.cellOwner(cell)
-        if owner is None:
+        owners = self.cellOwners(cell)
+        if len(owners) == 0:
             nearbyCells = self.findCellsInRange(newCell=cell)
-            unclaimedNearbyCellExists = any(self.cellOwner(nearby) is None for nearby in nearbyCells)
+            unclaimedNearbyCellExists = any(len(self.cellOwners(nearby)) == 0 for nearby in nearbyCells)
             if unclaimedNearbyCellExists:
                 self.acquireLandClaim(cell)
-        elif owner is self:
+        elif self in owners:
             self.processReturnToOwnedLand(cell)
-        elif owner.isAlive() == True:
+        elif any(owner.isAlive() == True for owner in owners):
             cell.lastHarvestedTimestep = self.timestep
             if self not in self.cellConsentedAgents(cell):
                 violation = {"trespasser": self, "cell": cell,
                              "amount": sugarHarvested + spiceHarvested, "timestep": self.timestep}
-                owner.locke["violations"].append(violation)
+                self.cellPendingViolations(cell).append(violation)
                 if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} trespasses on Agent {owner.ID}'s cell ({cell.x},{cell.y}), harvesting {round(violation['amount'], 2)}")
+                    print(f"Agent {self.ID} trespasses on co-owned cell ({cell.x},{cell.y}), harvesting {round(violation['amount'], 2)}")
 
     def processReturnToOwnedLand(self, cell):
         cell.lastHarvestedTimestep = self.timestep
-        self.convertViolationsToDebts(self, cell, self.timestep)
+        self.convertViolationsToDebts(cell, self.timestep)
         if "all" in self.debug or "agent" in self.debug:
-            print(f"Agent {self.ID} returns to owned cell ({cell.x},{cell.y})")
+            print(f"Agent {self.ID} returns to co-owned cell ({cell.x},{cell.y})")
 
     def processLandAbandonment(self):
         configuration = self.cell.environment.sugarscape.configuration
         decayThreshold = configuration["environmentLandDecayTimesteps"]
         stillOwned = []
         for claimedCell in self.locke["claims"]:
+            owners = self.cellOwners(claimedCell)
+            if self not in owners:
+                continue
             if self.timestep - claimedCell.lastHarvestedTimestep >= decayThreshold:
                 if "all" in self.debug or "agent" in self.debug:
                     print(f"Agent {self.ID} forfeits abandoned cell ({claimedCell.x},{claimedCell.y}) after {self.timestep - claimedCell.lastHarvestedTimestep} timesteps")
                 self.forfeitCellClaim(claimedCell)
-                self.locke["violations"] = [v for v in self.locke["violations"] if v["cell"] != claimedCell]
             else:
                 stillOwned.append(claimedCell)
         self.locke["claims"] = stillOwned
@@ -682,12 +704,21 @@ class Locke(agent.Agent):
 
     def doLandConsentGrants(self):
         for claimedCell in self.locke["claims"]:
+            owners = self.cellOwners(claimedCell)
+            if self not in owners:
+                continue
             fee = claimedCell.sugar + claimedCell.spice
             if fee <= 0:
                 continue
             consented = self.cellConsentedAgents(claimedCell)
+            approvals = self.cellConsentApprovals(claimedCell)
             for candidate in claimedCell.findNeighborAgents():
                 if candidate is self or candidate in consented or candidate.isAlive() == False:
+                    continue
+                candidateApprovals = approvals.setdefault(candidate, set())
+                candidateApprovals.add(self)
+                approvingShare = sum(owners.get(approver, 0) for approver in candidateApprovals)
+                if approvingShare <= 0.5:
                     continue
                 availableSugar = max(0, candidate.sugar - 50 * candidate.findSugarMetabolism())
                 availableSpice = max(0, candidate.spice - 50 * candidate.findSpiceMetabolism())
@@ -697,35 +728,38 @@ class Locke(agent.Agent):
                 spicePayment = fee - sugarPayment
                 candidate.sugar -= sugarPayment
                 candidate.spice -= spicePayment
-                self.sugar += sugarPayment
-                self.spice += spicePayment
+                for owner, share in owners.items():
+                    owner.sugar += sugarPayment * share
+                    owner.spice += spicePayment * share
                 consented.add(candidate)
+                del approvals[candidate]
                 if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} grants land consent on ({claimedCell.x},{claimedCell.y}) to Agent {candidate.ID} for fee {round(fee, 2)}")
+                    print(f"Agent {self.ID} and co-owners grant land consent on ({claimedCell.x},{claimedCell.y}) to Agent {candidate.ID} for fee {round(fee, 2)} ({round(approvingShare * 100, 1)}% approval)")
 
     def doLandBuyoutOffers(self):
         for neighborCell in self.cell.neighbors.values():
-            owner = self.cellOwner(neighborCell)
-            if owner is None or owner is self or owner.isAlive() == False:
-                continue
-            if neighborCell == owner.cell or neighborCell in owner.cellsInRange:
-                continue
-            price = neighborCell.maxSugar + neighborCell.maxSpice
-            if price <= 0:
-                continue
-            availableSugar = max(0, self.sugar - 50 * self.findSugarMetabolism())
-            availableSpice = max(0, self.spice - 50 * self.findSpiceMetabolism())
-            if availableSugar + availableSpice < price:
-                continue
-            sugarPayment = min(availableSugar, price)
-            spicePayment = price - sugarPayment
-            self.sugar -= sugarPayment
-            self.spice -= spicePayment
-            owner.sugar += sugarPayment
-            owner.spice += spicePayment
-            self.transferLand(neighborCell, owner, self)
-            if "all" in self.debug or "agent" in self.debug:
-                print(f"Agent {self.ID} buys out Agent {owner.ID}'s cell ({neighborCell.x},{neighborCell.y}) for {round(price, 2)}")
+            owners = self.cellOwners(neighborCell)
+            for targetOwner, share in list(owners.items()):
+                if targetOwner is self or targetOwner.isAlive() == False:
+                    continue
+                if neighborCell == targetOwner.cell or neighborCell in targetOwner.cellsInRange:
+                    continue
+                price = (neighborCell.maxSugar + neighborCell.maxSpice) * share
+                if price <= 0:
+                    continue
+                availableSugar = max(0, self.sugar - 50 * self.findSugarMetabolism())
+                availableSpice = max(0, self.spice - 50 * self.findSpiceMetabolism())
+                if availableSugar + availableSpice < price:
+                    continue
+                sugarPayment = min(availableSugar, price)
+                spicePayment = price - sugarPayment
+                self.sugar -= sugarPayment
+                self.spice -= spicePayment
+                targetOwner.sugar += sugarPayment
+                targetOwner.spice += spicePayment
+                self.transferShare(neighborCell, targetOwner, self)
+                if "all" in self.debug or "agent" in self.debug:
+                    print(f"Agent {self.ID} buys out Agent {targetOwner.ID}'s {round(share * 100, 1)}% share of cell ({neighborCell.x},{neighborCell.y}) for {round(price, 2)}")
 
     def doForcefulDebtCollection(self):
         for neighbor in self.cell.findNeighborAgents():
@@ -777,8 +811,8 @@ class Locke(agent.Agent):
 
     def findEthicalValueOfCell(self, cell):
         cellValue = cell.sugar + cell.spice
-        owner = self.cellOwner(cell)
-        if owner is not None and owner is not self and owner.isAlive() == True and self not in self.cellConsentedAgents(cell):
+        owners = self.cellOwners(cell)
+        if len(owners) > 0 and self not in owners and any(owner.isAlive() == True for owner in owners) and self not in self.cellConsentedAgents(cell):
             cellValue *= 1.0
         return cellValue
 
@@ -786,16 +820,27 @@ class Locke(agent.Agent):
         super().doInheritance()
         livingLockeChildren = [c for c in self.socialNetwork["children"] if c.isAlive() == True and isinstance(c, Locke)]
         for claimedCell in list(self.locke["claims"]):
-            if len(livingLockeChildren) > 0:
-                heir = random.choice(livingLockeChildren)
-                self.transferLand(claimedCell, self, heir)
-                if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} bequeaths cell ({claimedCell.x},{claimedCell.y}) to Agent {heir.ID}")
-            else:
-                self.forfeitCellClaim(claimedCell)
+            owners = self.cellOwners(claimedCell)
+            if self not in owners:
                 self.locke["claims"].remove(claimedCell)
+                continue
+            if len(livingLockeChildren) > 0:
+                self.convertViolationsToDebts(claimedCell, self.timestep)
+                myShare = owners.pop(self)
+                perChildShare = myShare / len(livingLockeChildren)
+                for child in livingLockeChildren:
+                    owners[child] = owners.get(child, 0) + perChildShare
+                    if claimedCell not in child.locke["claims"]:
+                        child.locke["claims"].append(claimedCell)
                 if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} dies without Locke heirs; cell ({claimedCell.x},{claimedCell.y}) reverts to unclaimed")
+                    print(f"Agent {self.ID} bequeaths {round(myShare * 100, 1)}% share of cell ({claimedCell.x},{claimedCell.y}) split among {len(livingLockeChildren)} children")
+            else:
+                del owners[self]
+                if "all" in self.debug or "agent" in self.debug:
+                    print(f"Agent {self.ID} dies without Locke heirs; share of cell ({claimedCell.x},{claimedCell.y}) reverts to unclaimed")
+            if len(owners) == 0:
+                self.forfeitCellClaim(claimedCell)
+            self.locke["claims"].remove(claimedCell)
         for debt in list(self.locke["debtsReceivable"]):
             self.removeSettledDebt(debt)
         for debt in list(self.agentLandDebtsOwed(self)):
