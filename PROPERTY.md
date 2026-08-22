@@ -1,355 +1,244 @@
 # Property (the `locke` decision model)
 
-This document describes the `locke` agent decision model as implemented on the
-`locke` branch: a Lockean theory of property (land is claimed by labor, lost
-through non-use, defended through reparation and force, licensed through
-consent, and passed down through inheritance) expressed as Sugarscape agent
-rules. It covers what is built (Phase 1: property) and calls out what is
-explicitly deferred (Phase 2: trust and government).
+A complete, source-order reference to every file the `locke` branch has ever
+touched (per `git diff a46ec6f..HEAD --stat`, the commit before the `Locke`
+class existed), every class in those files that changed, and every method in
+those classes — or, for single-line/config changes, the line itself.
 
-Implementation lives in `ethics.Locke` (`ethics.py:552-849`), with one piece of
-shared infrastructure in the base `agent.Agent` class
-(`agent.py:249-278`) so that land claims are enforceable against agents of
-*any* decision model, not just other `locke` agents.
+## `ethics.py` — `class Locke(agent.Agent)` (`ethics.py:552-849`)
 
-## Design source
+- **`__init__(self, agentID, birthday, cell, configuration)`** (`552-556`) —
+  Calls `super().__init__` for standard agent setup, then adds
+  `self.locke = {"claims": [], "debtsReceivable": []}`: the agent's own
+  bookkeeping of which cells it holds a share in, and which debts are owed
+  *to* it as creditor.
+  *Design choice — bookkeeping structure, no textual analog.*
+- **`cellOwners(self, cell)`** (`557-560`) — Lazily creates and returns
+  `cell.owners` (a `{agent: share}` dict) the first time it's touched. The
+  central accessor for reading ownership anywhere in the class.
+  *Design choice — lazy accessor plumbing for the ownership concept grounded in Locke, Sect. 27: "every man has a property in his own person... the labour of his body, and the work of his hands, we may say, are properly his."*
+- **`cellConsentedAgents(self, cell)`** (`562-565`) — Lazily creates and
+  returns `cell.consentedAgents`, the set of agents with standing harvest
+  permission on that cell.
+  *Design choice — the co-owner voting data structure has no textual basis; Locke never describes joint ownership or how joint owners must agree.*
+- **`cellConsentApprovals(self, cell)`** (`567-570`) — Lazily creates and
+  returns `cell.consentApprovals`, a `{candidate: {owners who voted yes}}`
+  dict tracking in-progress majority votes to admit a new consented
+  harvester.
+  *Design choice — accessor plumbing.*
+- **`cellPendingViolations(self, cell)`** (`572-575`) — Lazily creates and
+  returns `cell.pendingViolations`, the list of thefts not yet converted
+  into debt.
+  *Design choice — accessor plumbing.*
+- **`agentLandDebtsOwed(self, agent)`** (`577-580`) — Lazily creates and
+  returns `agent.landDebtsOwed` on **any** agent object passed in, not just
+  `Locke` instances. This single line is what lets a non-`Locke` agent carry
+  land debt at all.
+  *Design choice — accessor plumbing; the underlying reparation debt it stores is grounded in Locke, Sect. 10 (see `convertViolationsToDebts` below).*
+- **`claimCellFor(self, cell, owner)`** (`582-586`) — Sets
+  `cell.owners = {owner: 1.0}` (100% single ownership), stamps
+  `lastHarvestedTimestep` to the current timestep, and resets
+  `consentedAgents`/`consentApprovals` to empty. The ownership-establishing
+  primitive, used when a cell is first claimed.
+  *Locke, Sect. 32: "As much land as a man tills, plants, improves, cultivates, and can use the product of, so much is his property. He by his labour does, as it were, inclose it from the common."*
+- **`forfeitCellClaim(self, cell)`** (`588-592`) — The inverse of
+  `claimCellFor`: wipes `cell.owners` back to `{}`, resets
+  `lastHarvestedTimestep` to `-1`, and clears consent state. This is what
+  "reverts to the commons" means mechanically.
+  *Locke, Sect. 38: "if either the grass of his enclosure rotted on the ground, or the fruit of his planting perished without gathering, and laying up, this part of the earth, notwithstanding his enclosure, was still to be looked on as waste, and might be the possession of any other."*
+- **`convertViolationsToDebts(self, cell, timestep)`** (`594-608`) — For
+  every pending violation on the cell, splits the stolen `amount` across all
+  current owners proportional to share, creates one debt record per
+  (owner, trespasser) pair, files it on both the creditor's
+  `debtsReceivable` and the debtor's `landDebtsOwed`, then clears
+  `pendingViolations`. This is the "owner returns → theft becomes debt"
+  step.
+  *Locke, Sect. 10: "he who hath received any damage, has... a particular right to seek reparation from him that has done it."*
+- **`removeSettledDebt(self, debt)`** (`610-617`) — Removes one fully-paid
+  or otherwise-discharged debt from both the creditor's `debtsReceivable`
+  and the debtor's `landDebtsOwed` lists.
+  *Design choice — ledger cleanup once reparation (Sect. 10) has already been satisfied; no distinct textual basis of its own.*
+- **`transferShare(self, cell, previousOwner, newOwner)`** (`619-629`) —
+  Moves one owner's entire share of a cell to a new owner: settles any
+  pending violations into debts first (so nothing is lost in the handoff),
+  then pops the share off the old owner and adds it to the new owner,
+  updating both agents' `locke["claims"]` lists. Used by buyouts.
+  *Design choice — internal share-moving primitive; the substantive "purchase" concept it serves is grounded in Sect. 120 (see `doLandBuyoutOffers` below).*
+- **`acquireLandClaim(self, cell)`** (`631-635`) — Thin wrapper calling
+  `claimCellFor(cell, self)` and appending the cell to
+  `self.locke["claims"]` — the actual "claim this cell" action taken when
+  harvesting unclaimed land.
+  *Locke, Sect. 28: "That labour put a distinction between them and common: that added something to them more than nature, the common mother of all, had done; and so they became his private right."*
+- **`collectResourcesAtCell(self)`** (`637-648`) — Override of the base
+  harvesting method. Calls `super().collectResourcesAtCell()` first (which
+  now also runs the generic trespass check — see `agent.py` below). Then:
+  if the cell is unclaimed and unclaimed land still exists nearby, claims
+  it; if `self` is already an owner, calls `processReturnToOwnedLand`.
+  *Design choice — dispatch/routing logic; the substantive rules it dispatches to (`acquireLandClaim`, `processReturnToOwnedLand`) each carry their own citation.*
+- **`processReturnToOwnedLand(self, cell)`** (`650-654`) — Re-stamps
+  `lastHarvestedTimestep` and calls `convertViolationsToDebts` — the "owner
+  comes back to land that was stolen from" moment from the design.
+  *Design choice — the specific "wait until the owner returns" timing is invented; the reparation right it triggers is grounded in Sect. 10 (see `convertViolationsToDebts` above).*
+- **`processLandAbandonment(self)`** (`656-670`) — Runs every timestep for
+  every claim the agent holds; forfeits any cell the *owner* hasn't
+  harvested in `environmentLandDecayTimesteps` steps, otherwise keeps it in
+  the agent's claims list. A trespasser or consented licensee harvesting the
+  cell does not reset this clock (see `recordLandTrespassIfOwned` in
+  `agent.py` below) — a claim under continuous theft still decays.
+  *Locke, Sect. 38 (see `forfeitCellClaim` above) grounds losing land through non-use; the specific numeric timestep threshold (`environmentLandDecayTimesteps`) is a design choice — Locke never puts a number on it.*
+- **`settleDebtsVoluntarily(self)`** (`672-693`) — Runs every timestep; for
+  every debt the agent owes, pays down as much as it can from sugar/spice
+  above its own metabolic need (sugar first, then spice), removing the debt
+  once fully paid. No proximity requirement.
+  *Locke, Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life."*
+- **`doLandConsentGrants(self)`** (`695-727`) — Runs every timestep for
+  every cell the agent co-owns; for each agent adjacent to that cell not
+  yet consented, records this owner's approval vote, and once accumulated
+  approvals exceed 50% of ownership share, charges the candidate the cell's
+  current `sugar + spice` value (with a 50-metabolism-timestep reserve
+  buffer) split pro rata across all owners, then marks the candidate
+  consented.
+  *Locke, Sect. 120 lists "permission" alongside inheritance and purchase as a valid means by which another may come to enjoy land — grounding owner-granted consent in general; the majority-by-share voting mechanism and the fee formula are both design choices with no textual basis.*
+- **`doLandBuyoutOffers(self)`** (`729-752`) — Runs every timestep; for
+  every cell adjacent to the agent's current position that it doesn't
+  itself own, if that cell lies outside the current owner's own foraging
+  range, offers to buy that owner's share outright at
+  `(maxSugar + maxSpice) * share` (again with the 50-metabolism-timestep
+  reserve buffer), paying directly and calling `transferShare`.
+  *Locke, Sect. 120: "Whoever therefore, from thenceforth, by inheritance, purchase, permission, or otherways, enjoys any part of the land... must take it with the condition it is under." The buyout price formula itself is a design choice.*
+- **`doForcefulDebtCollection(self)`** (`754-782`) — Runs every timestep;
+  for every neighboring agent, for every debt that neighbor owes (to
+  anyone, since debts can be owed by any agent type), once the debt is
+  older than `environmentLandForcefulCollectionGraceTimesteps`, seizes
+  whatever sugar/spice the debtor currently has (not limited to an
+  above-metabolism reserve) and pays it to the creditor.
+  *Locke, Sect. 19: "Thus a thief, whom I cannot harm, but by appeal to the law, for having stolen all that I am worth, I may kill, when he sets on me to rob me... because the law... permits me my own defence, and the right of war."*
+- **`doTrading(self)`** (`784-788`) — Override that runs the base agent's
+  ordinary sugar/spice trading first (`super().doTrading()`), then the
+  three land-specific behaviors above in order: consent grants, buyouts,
+  forceful collection.
+  *Design choice — pure call-sequencing wrapper.*
+- **`findBestEthicalCell(self, cells, greedyBestCell=None)`** (`790-802`) —
+  Override of the base movement-decision hook; scores every candidate cell
+  via `findEthicalValueOfCell` and picks the highest-scoring one. This is
+  what actually decides where a `Locke` agent moves each timestep.
+  *Design choice — generic movement-selection architecture shared by every decision model in the codebase, not Locke-specific content.*
+- **`findEthicalValueOfCell(self, cell)`** (`804-809`) — Computes a cell's
+  attractiveness as `sugar + spice`, with a conditional multiply by `1.0`
+  when the cell is owned by someone else without consent — currently a
+  no-op, so ownership has zero effect on movement choice.
+  *Design choice — currently a no-op stub; there is no implemented concept here to cite.*
+- **`doInheritance(self)`** (`811-839`) — Runs the base wealth-inheritance
+  mechanic first (`super().doInheritance()`), then for every claimed cell,
+  either splits the deceased's share evenly across all living `Locke`
+  children (co-ownership) or, if none exist, removes the deceased's share
+  outright; forfeits the cell entirely if no owners remain afterward. Also
+  discharges all of the deceased's outstanding debts/receivables.
+  *Locke, Sect. 72: "the possession of the father being the expectation and inheritance of the children, ordinarily in certain proportions, according to the law and custom of each country." Locke explicitly leaves the split mechanism to "law and custom," so the specific choice of an equal split among every living child is a design choice within a space Locke deliberately left open.*
+- **`updateValues(self)`** (`841-844`) — Per-timestep hook (calls base
+  `super().updateValues()`) that triggers `processLandAbandonment` and
+  `settleDebtsVoluntarily` — the two behaviors that happen automatically
+  every timestep regardless of the agent's location.
+  *Design choice — per-timestep orchestration hook, architecture not content.*
+- **`spawnChild(self, childID, birthday, cell, configuration)`**
+  (`846-847`) — Returns a new `Locke` instance for reproduction, so a
+  `Locke` agent's children are also `Locke` agents by default. This is what
+  makes every `isinstance(c, Locke)` heir-eligibility check meaningful.
+  *Design choice — technical mechanism ensuring heirs are typed correctly for the `isinstance(c, Locke)` checks elsewhere; not itself a textual claim.*
 
-The rules below were specified as a set of design paragraphs (not derived
-from the code), cross-checked against Locke's *Second Treatise of Government*,
-Chapter V ("Of Property") and Chapter VIII ("Of the Beginning of Political
-Societies"). Where the implementation diverges from those paragraphs, or adds
-behavior the paragraphs don't specify, it's called out explicitly in
-[Implementation details not covered by the design](#implementation-details-not-covered-by-the-design)
-below.
+## `agent.py` — `class Agent` (base class, only the touched methods)
 
-## Data model
+- **`collectResourcesAtCell(self)`** (`249-260`) — One line added:
+  `self.recordLandTrespassIfOwned(sugarCollected, spiceCollected)`, inserted
+  after pollution handling and before the cell's sugar/spice are reset. This
+  ensures every harvest, by every agent type, checks for trespass before the
+  cell's resources are cleared for the next timestep.
+  *Design choice — the insertion point (where in the base harvesting flow the check runs) is architecture, not textual content.*
+- **`recordLandTrespassIfOwned(self, sugarCollected, spiceCollected)`**
+  (`262-278`) — New method, generic (not `Locke`-specific) trespass
+  detector: if the cell has a living owner and `self` isn't one of them,
+  and `self` isn't already a consented licensee, appends a violation record
+  to `cell.pendingViolations`. Deliberately does **not** touch
+  `lastHarvestedTimestep` — only the owner's own harvest resets the
+  abandonment clock (in `processReturnToOwnedLand`), so a claim under
+  continuous theft still decays per Locke's spoilage proviso, which is keyed
+  to the possessor's own use, not mere third-party contact with the land.
+  Because this lives on the base `Agent` class rather than inside `Locke`,
+  it fires for any decision model, satisfying "any agent regardless of
+  decision model" from the design.
+  *Locke, Sect. 6: "The state of nature has a law of nature to govern it, which obliges every one: and reason, which is that law, teaches all mankind, who will but consult it... no one ought to harm another in his life, health, liberty, or possessions." The law of nature binds everyone, not just fellow property-owners — grounding why this check has to live on the base `Agent` class rather than inside `Locke`.*
 
-Land ownership and its consequences are stored as plain attributes bolted
-onto `Cell` and `Agent` objects on first use, via `hasattr`-guarded accessor
-methods on `Locke` (`ethics.py:557-580`):
+## `sugarscape.py` (single-line/single-block changes, no new methods)
 
-| Attribute | Lives on | Meaning |
-|---|---|---|
-| `cell.owners` | `Cell` | `{agent: share}` — fractional ownership of the cell. A cell with no entry, or an empty dict, is unclaimed. |
-| `cell.lastHarvestedTimestep` | `Cell` | Timestep this cell was last harvested by *anyone* (owner, licensee, or trespasser). Drives abandonment. |
-| `cell.consentedAgents` | `Cell` | Set of agents who have paid for and received standing permission to harvest this cell. |
-| `cell.consentApprovals` | `Cell` | `{candidate_agent: {owners who have voted to admit them}}` — in-progress consent votes. |
-| `cell.pendingViolations` | `Cell` | List of `{trespasser, cell, amount, timestep}` — thefts not yet converted to debt. |
-| `agent.landDebtsOwed` | any `Agent` | List of debts this agent owes as a debtor (works for non-`Locke` agents too). |
-| `agent.locke["claims"]` | `Locke` agent | List of cells this agent currently holds any ownership share in. |
-| `agent.locke["debtsReceivable"]` | `Locke` agent | List of debts owed *to* this agent as creditor. |
+- **Agent factory** (`235-236`, inside the agent-creation method) — Adds
+  `elif "locke" in agentConfiguration["decisionModel"]: a = ethics.Locke(...)`.
+  This is the only place in the whole codebase a `Locke` agent object is
+  actually instantiated during simulation setup or dead-agent replacement.
+  *Design choice — Python object-instantiation plumbing.*
+- **Default configuration dict** (`1914-1915`) — Adds
+  `"environmentLandDecayTimesteps": 50` and
+  `"environmentLandForcefulCollectionGraceTimesteps": 1` as hardcoded
+  defaults. This is load-bearing: the config-file-override loop
+  (`for opt in configuration: if opt in options: ...`) only applies a
+  `config.json` value for a key that *already exists* in this dict — a key
+  present only in the JSON file and not here is silently ignored. (This is
+  exactly the bug that made the grace-period config fix fail the first time
+  it was tried, before this dict entry was added.)
+  *Design choice — Python config-plumbing; see the note on why both dict entries are load-bearing.*
 
-Because `owners`, `consentedAgents`, `pendingViolations`, etc. live on the
-`Cell` and generic `Agent` objects rather than exclusively inside `Locke`,
-land claims are visible to and enforceable against every decision model in
-the simulation, not only other `locke` agents.
+## `config.json` (`sugarscapeOptions`, value/key changes only)
 
-## Land claiming
+- **`agentDecisionModels`** (line `17`) — Value changed from `["bentham"]`
+  to `["locke"]`, making `locke` the active decision model for this
+  scenario's default run.
+  *Design choice — scenario configuration value.*
+- **`environmentLandDecayTimesteps: 3`** (line `83`, new key) — Overrides
+  the code default of `50` down to `3` for this scenario.
+  *Design choice (numeric value); the underlying concept is grounded in Sect. 38 — see `forfeitCellClaim` above.*
+- **`environmentLandForcefulCollectionGraceTimesteps: 1`** (line `84`, new
+  key) — Matches the code default of `1`.
+  *Design choice — Locke specifies no time period at all before force becomes legitimate; see Sect. 19 under `doForcefulDebtCollection` above.*
 
-An agent claims a cell by harvesting it, but only if the claim wouldn't be
-the last unclaimed land around — i.e. Locke's "enough, and as good left in
-common for others" proviso, read here as *spatial* sufficiency rather than
-global sufficiency:
+## `gui.py` — `class GUI` (only the touched lines)
 
-```
-collectResourcesAtCell()                      ethics.py:637
-  owners = cellOwners(cell)
-  if len(owners) == 0:
-      unclaimedNearbyCellExists = any cell in findCellsInRange() is also unclaimed
-      if unclaimedNearbyCellExists:
-          acquireLandClaim(cell)               ethics.py:631
-```
+- **`self.colors` dict** (constructor, `~line 26`) — Adds
+  `"claimed": "#C87850"`, the tint color blended into a claimed cell's
+  normal color.
+  *Design choice — visualization only.*
+- **`configureEnvironmentColorNames(self)`** (`218`) — Adds `"Land Claims"`
+  to the list of selectable environment coloring modes, which previously
+  only offered `"Pollution"`.
+  *Design choice — visualization only.*
+- **`lookupFillColor(self, cell)`** (`661-665`) — Adds an `elif` branch for
+  when `activeColorOptions["environment"] == "Land Claims"`: colors an
+  unoccupied cell by its normal sugar/spice color, blended 50% toward the
+  `"claimed"` tint if `len(cell.owners) > 0` — a binary claimed/unclaimed
+  check, not proportional to share count.
+  *Design choice — visualization only.*
 
-`acquireLandClaim` sets `cell.owners = {self: 1.0}` (100% share to the
-claimant) and stamps `lastHarvestedTimestep` (`claimCellFor`, `ethics.py:582`).
+## `README` (documentation only, no behavior)
 
-## Land abandonment
+- **`agentDecisionModels` entry** — Adds `"locke"` to the `Options:` list and
+  a new `Note:` line documenting that trespass detection fires regardless of
+  the trespasser's own decision model.
+  *Design choice — documentation, not a textual claim.*
+- **`environmentLandDecayTimesteps` entry** (new) — Documents the decay
+  config key, its Locke-only relevance, and its code default of `50`.
+  *Design choice — documentation; concept grounded in Sect. 38, see `forfeitCellClaim` above.*
+- **`environmentLandForcefulCollectionGraceTimesteps` entry** (new) —
+  Documents the grace-period config key, its Locke-only relevance, and its
+  default of `1`.
+  *Design choice — documentation; see Sect. 19 under `doForcefulDebtCollection` above.*
 
-Each timestep, every `Locke` agent checks its own claims
-(`processLandAbandonment`, `ethics.py:656`) and forfeits any cell that hasn't
-been harvested in `environmentLandDecayTimesteps` steps:
+## `examples/locke_basic.json` (new file, not a class)
 
-```python
-if self.timestep - claimedCell.lastHarvestedTimestep >= decayThreshold:
-    forfeitCellClaim(claimedCell)   # cell.owners = {}, reverts to unclaimed
-```
+A standalone, runnable example scenario for the `locke` decision model, with
+its own `__README__` summary field. Notable settings distinct from the main
+`config.json`: `agentInheritancePolicy: "children"` (same value as the main
+config, so the wealth/land inheritance asymmetry above applies here too),
+and `environmentLandDecayTimesteps: 10` (different from both the main
+config's `3` and the code default of `50`). It doesn't override
+`environmentLandForcefulCollectionGraceTimesteps`, so that scenario runs on
+the code default of `1`.
 
-**Note:** `lastHarvestedTimestep` is updated by *any* harvest of the cell —
-owner, consented licensee, or trespasser (see
-[Implementation details](#implementation-details-not-covered-by-the-design)) —
-not specifically the owner's own harvest. A cell being actively stolen from
-every timestep will never decay, even if the owner never returns to it.
-
-Config: `environmentLandDecayTimesteps` (default `50` in code, `3` in
-`config.json`'s example scenario).
-
-## Trespass, violations, and debt
-
-Trespass detection lives in the base `Agent` class
-(`agent.py:262-278`, called from `collectResourcesAtCell` at
-`agent.py:249-260`), so it fires for **any** agent that harvests a claimed
-cell without consent — `locke`, `bentham`, `egoist`, etc. — not only other
-`locke` agents:
-
-```
-recordLandTrespassIfOwned(sugarCollected, spiceCollected)   agent.py:262
-  owners = cell.owners  (if any, and self is not one of them, and some owner is alive)
-      cell.lastHarvestedTimestep = self.timestep
-      if self not in cell.consentedAgents:
-          cell.pendingViolations.append({trespasser: self, cell, amount, timestep})
-```
-
-The theft is *not* immediately turned into a debt — it sits as a pending
-violation until the owner actually returns to the cell:
-
-```
-collectResourcesAtCell()  (Locke override)     ethics.py:637
-  elif self in owners:
-      processReturnToOwnedLand(cell)            ethics.py:650
-        -> convertViolationsToDebts(cell, timestep)   ethics.py:594
-```
-
-`convertViolationsToDebts` splits each pending violation's `amount` across
-all co-owners proportional to their `share`, creating one debt record per
-(owner, trespasser) pair, then clears `cell.pendingViolations`.
-
-### Settling debt
-
-Two independent, complementary paths exist, matching the "agents pay ...
-despite physical constraint, although forceful collection does[require
-proximity]" rule:
-
-**Voluntary** (`settleDebtsVoluntarily`, `ethics.py:672`) — runs every
-timestep for every debtor, with no proximity requirement. A debtor pays down
-its debts out of whatever sugar/spice it has *above* its own metabolic need,
-sugar first, then spice, for the same nominal value regardless of which
-resource is used.
-
-**Forceful** (`doForcefulDebtCollection`, `ethics.py:754`, called from
-`doTrading` at `ethics.py:784`) — requires the collecting agent to be
-adjacent to the debtor (`self.cell.findNeighborAgents()`), and only fires
-once the debt has aged past a grace period:
-
-```python
-graceTimesteps = configuration["environmentLandForcefulCollectionGraceTimesteps"]
-if self.timestep - debt["createdTimestep"] < graceTimesteps:
-    continue
-```
-
-Config: `environmentLandForcefulCollectionGraceTimesteps` (default `1`).
-Forceful collection seizes whatever sugar/spice the debtor currently has —
-unlike voluntary settlement, it is *not* limited to the amount above the
-debtor's metabolic need.
-
-**What "adjacent"/"physically constrained" actually means spatially** is not
-a Locke-specific concept — every mechanic below that requires proximity
-(forceful collection above, plus consent grants and buyouts further down)
-is built on `Cell.neighbors`, which is generic environment topology:
-radius-1 only, either 4-connected (`neighborhoodMode: "vonNeumann"`, the
-default — north/south/east/west) or 8-connected (`"moore"`, adds the four
-diagonals), and wraps around the grid edges by default
-(`environmentWraparound: true`), so two agents on opposite edges of the map
-can be "adjacent" for the purposes of every Locke mechanic below.
-
-## Consent-based licensing
-
-An owner (or majority of co-owners, by share) can grant standing permission
-to harvest a claimed cell in exchange for a fee, evaluated every timestep in
-`doLandConsentGrants` (`ethics.py:695`), owner-initiated and
-physically-constrained to agents adjacent to **the claimed cell itself**
-(`claimedCell.findNeighborAgents()`) — not to the owner's current position,
-since an owner processes every cell it holds a share in each timestep,
-regardless of where it's currently standing:
-
-```python
-fee = claimedCell.sugar + claimedCell.spice        # current yield, not potential
-for candidate in claimedCell.findNeighborAgents():
-    candidateApprovals.add(self)                    # this owner votes yes
-    approvingShare = sum(shares of all owners who have voted yes)
-    if approvingShare <= 0.5:
-        continue                                      # needs a majority of shares
-    if candidate can afford fee (with a 50-metabolism-timestep reserve buffer):
-        candidate pays fee, split pro rata across owners by share
-        candidate added to cell.consentedAgents
-```
-
-Consent, once granted, is permanent (the candidate stays in
-`consentedAgents` and is never removed short of the cell being forfeited or
-re-claimed).
-
-## Out-of-range buyouts
-
-If a claimed cell falls outside its owner's own foraging range
-(`cellsInRange`), a *different* `locke` agent may buy that share outright and
-permanently — but only if the buyer is currently standing adjacent to that
-cell (`self.cell.neighbors.values()`, i.e. relative to **the buyer's own
-position**, the opposite reference frame from consent grants above),
-evaluated in `doLandBuyoutOffers` (`ethics.py:729`):
-
-```python
-if neighborCell == targetOwner.cell or neighborCell in targetOwner.cellsInRange:
-    continue                                          # still in owner's range: not buyable
-price = (neighborCell.maxSugar + neighborCell.maxSpice) * share   # potential yield, not current
-if buyer can afford price (with a 50-metabolism-timestep reserve buffer):
-    pay targetOwner, transferShare(cell, targetOwner, self)
-```
-
-`transferShare` (`ethics.py:619`) moves the target owner's share to the
-buyer, converting any pending violations to debts first so nothing is lost
-in the handoff.
-
-## Inheritance
-
-On death, `doInheritance` (`ethics.py:811`) splits each claimed cell
-fractionally, in equal shares, across every currently-living `locke` child;
-if none exist, the cell reverts toward the commons:
-
-```python
-livingLockeChildren = [c for c in socialNetwork["children"] if c.isAlive() and isinstance(c, Locke)]
-for claimedCell in self.locke["claims"]:
-    convertViolationsToDebts(claimedCell, timestep)     # settle the ledger before transferring
-    if livingLockeChildren:
-        perChildShare = myShare / len(livingLockeChildren)
-        # each living Locke child's ownership share increases by perChildShare
-    else:
-        del owners[self]                                 # this owner's share is simply removed
-    if len(owners) == 0:
-        forfeitCellClaim(claimedCell)                    # only reverts to commons if NO owners remain
-```
-
-Note that "reverts to the commons" is a consequence of the owners dict
-becoming empty, not a direct rule — on a co-owned cell, a childless owner's
-share is just removed while surviving co-owners (or their heirs) keep theirs.
-
-Outstanding debts and receivables belonging to the deceased are discharged
-(not transferred) at death — `removeSettledDebt` is called on all of them at
-the end of `doInheritance`.
-
-### Land inheritance vs. wealth inheritance
-
-`Locke.doInheritance` opens with `super().doInheritance()` (`ethics.py:812`),
-which runs the **generic, decision-model-agnostic** inheritance mechanic
-already present in `agent.Agent.doInheritance` (`agent.py:391`) before any
-Locke-specific land splitting happens. That base mechanic splits the
-deceased's *sugar and spice* evenly across recipients chosen by the
-`agentInheritancePolicy` config value (`"none"`, `"children"`, `"sons"`,
-`"daughters"`, or `"friends"`) — entirely independent of the land logic
-below it.
-
-This produces an asymmetry worth knowing about: wealth inheritance under
-`agentInheritancePolicy: "children"` splits across **every** living child,
-Locke or not, while land inheritance splits only across living children that
-are themselves `isinstance(c, Locke)`. A Locke parent with one Locke child
-and one Bentham child will have both children inherit sugar/spice, but only
-the Locke child inherits any land share.
-
-
-
-## Configuration reference
-
-| Key | Default (code / `config.json`) | Meaning |
-|---|---|---|
-| `agentDecisionModels` | `["none"]` / `["locke"]` | Include `"locke"` to enable this decision model. |
-| `environmentLandDecayTimesteps` | `50` / `3` | Timesteps a claimed cell can go unharvested (by anyone) before the claim is forfeited. |
-| `environmentLandForcefulCollectionGraceTimesteps` | `1` / `1` | Timesteps a land debt must age before it can be forcefully collected. |
-| `agentInheritancePolicy` | `"none"` / `"children"` in `config.json` (also `"children"` in `examples/locke_basic.json`) | Generic, non-Locke-specific wealth (sugar/spice) inheritance policy — see [Land inheritance vs. wealth inheritance](#land-inheritance-vs-wealth-inheritance). **Active by default in this repo's `config.json`**, so the child-filter asymmetry described there is live, not hypothetical. |
-
-## Cross-decision-model interactions
-
-- **Any** agent, regardless of its own decision model, can trigger a
-  trespass violation by harvesting a `locke` agent's claimed cell without
-  consent (`agent.py:262`).
-- **Any** agent that owes a land debt can have it forcefully collected by an
-  adjacent `locke` creditor or co-owner (`doForcefulDebtCollection` no longer
-  restricts collection targets to other `locke` agents).
-- Only `locke` agents can *own* land, *grant* consent, *offer* buyouts, or
-  *inherit* claims — those actions live entirely inside the `Locke` class and
-  require `isinstance(x, Locke)` (e.g. `doInheritance`'s
-  `livingLockeChildren` filter).
-
-## Observability
-
-There is currently no aggregate instrumentation for any part of this system.
-`updateRuntimeStatsPerGroup` (`sugarscape.py:1007`) — the function that
-builds every per-timestep stat written to `log.json` and every series
-available to `dataCollectionOptions.plots` (`deaths`, `giniCoefficient`,
-`happiness`, `lifeExpectancy`, `population`, `sickness`, `tradeVolume`,
-`ttl`, `wealth`) — has no land/claim/violation/debt counters at all. The
-only ways to observe this system while it runs are:
-
-- Per-event debug print statements, gated behind `debugMode` containing
-  `"all"` or `"agent"`, on essentially every state-changing method above
-  (claims, trespasses, debt conversion, voluntary/forceful settlement,
-  consent grants, buyouts, bequests, abandonment).
-- The GUI's binary "Land Claims" color mode (see item 7 below).
-
-There is no way to plot, e.g., total land under claim, outstanding debt, or
-violation rate over time without parsing debug output by hand.
-
-## Implementation details not covered by the design
-
-These are real, verified behaviors in the current code that the design
-paragraphs don't specify one way or the other. They're not necessarily bugs
-— several are reasonable implementation choices — but they're worth knowing
-about:
-
-1. **Abandonment resets on any harvest, not the owner's harvest specifically.**
-   `lastHarvestedTimestep` is stamped by trespassers and consented licensees
-   too, so a claim under continuous theft never decays even if the true
-   owner never returns.
-2. **Consent grants require majority-by-share approval**, not a single
-   owner's decision — a voting mechanic that only matters because land can
-   be fractionally co-owned (via inheritance or partial buyouts).
-3. **Two distinct, unstated pricing formulas**: consent fee uses the cell's
-   *current* `sugar + spice`; buyout price uses the cell's *potential*
-   `maxSugar + maxSpice`.
-4. **A hardcoded 50-metabolism-timestep reserve buffer** gates both consent
-   payments and buyouts — an agent won't spend itself below that buffer to
-   pay for either.
-5. **`findEthicalValueOfCell` (`ethics.py:804`) multiplies cell value by
-   `1.0`** when the cell is owned by someone else without consent — a no-op
-   stub. It reads as an unfinished attempt to make unconsented land look
-   less attractive to the agent's own movement/foraging choice, but
-   currently does nothing. Practical consequence: `findBestEthicalCell`
-   (`ethics.py:790`), which is what actually picks where a `Locke` agent
-   moves each timestep, scores an unconsented, owned cell exactly the same
-   as free land. Locke agents show no movement-level aversion to someone
-   else's claimed cell — they walk onto and harvest it the same as they
-   would unclaimed land, and only feel a consequence afterward, through the
-   violation/debt pipeline.
-6. **Voluntary debt settlement runs unconditionally every timestep** for
-   every debtor with any land debt, independent of and prior to any forceful
-   collection attempt.
-7. **The GUI's "Land Claims" coloring is binary, not proportional**
-   (`gui.py:661-665`): it blends a fixed "claimed" tint onto any cell with
-   `len(cell.owners) > 0`, regardless of how many owners there are or what
-   share each holds. Fractional co-ownership from inheritance/buyouts isn't
-   visually distinguishable from single ownership.
-
-## Not yet implemented: trust and social contract (Phase 2)
-
-The following is specified in the design but has **no corresponding code**
-anywhere in `ethics.py`, `agent.py`, `sugarscape.py`, or `config.json` as of
-this writing:
-
-- Trust-point accrual: an agent gains a trust point with a neighbor's cell
-  owner for being adjacent to that cell without stealing from it.
-- A per-agent-pair randomized threshold (drawn from a `config.json` array
-  such as `[4, 8]`) at which trust converts into a social contract.
-- Social contract formation requiring *both* agents to have independently
-  reached their threshold with each other.
-- A "government" body: a shared debt/violation list across all contracted
-  members, with any member able to collect violations or debts on behalf of
-  any other member.
-- Frictionless joining: a new agent can join an existing government by
-  itself consenting, without the existing body needing to re-form or
-  re-vote.
-- Trust tracked for *all* agents, regardless of their own decision model —
-  not just other `locke` agents.
-- Exclusion from the social contract grounded strictly in incapacity to
-  consent (e.g. agents that can't reason/consent at all), never in
-  arbitrary discrimination.
-- Trust resetting to zero for an agent upon any violation.
-
-None of this exists yet. Everything documented above this section is Phase 1
-(property) only.
+*Design choice — a runnable scenario file, not a textual claim.*

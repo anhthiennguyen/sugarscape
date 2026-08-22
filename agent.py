@@ -266,7 +266,9 @@ class Agent:
         owners = getattr(self.cell, "owners", None)
         if not owners or self in owners or not any(owner.isAlive() == True for owner in owners):
             return
-        self.cell.lastHarvestedTimestep = self.timestep
+        # Only the owner's own harvest keeps a claim from abandonment (see
+        # processReturnToOwnedLand) - a trespasser or consented licensee
+        # harvesting the cell does not, even repeatedly.
         if self in getattr(self.cell, "consentedAgents", ()):
             return
         if not hasattr(self.cell, "pendingViolations"):
