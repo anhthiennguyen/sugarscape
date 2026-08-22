@@ -90,11 +90,14 @@ those classes — or, for single-line/config changes, the line itself.
   every debt the agent owes, pays down as much as it can from sugar/spice
   above its own metabolic need (sugar first, then spice), removing the debt
   once fully paid. No proximity requirement.
-  *Locke, Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life."*
+  *Locke, Sect. 37: "the intrinsic value of things... depends only on their usefulness to the life of man," combined with Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life." Together these ground value as commensurable across different useful goods, but it's a stretched analogy: Locke's money is valuable specifically because it is NOT one of the perishable staples, whereas sugar and spice here are the staples themselves — the "same nominal value regardless of resource" rule has no tight single-passage match.*
 - **`doLandConsentGrants(self)`** (`695-727`) — Runs every timestep for
   every cell the agent co-owns; for each agent adjacent to that cell not
-  yet consented, records this owner's approval vote, and once **every**
-  current owner has approved (unanimous, not share-weighted), charges the
+  yet consented, co-signs — there is no dissent path; an owner
+  unconditionally adds itself to the approval set every timestep it
+  processes the claim, with no cost-benefit check of any kind — and once
+  **every** current owner has signed on (unanimous, not share-weighted),
+  charges the
   candidate the cell's current `sugar + spice` value (with a
   50-metabolism-timestep reserve buffer) split pro rata across all owners,
   then marks the candidate consented.
@@ -111,8 +114,9 @@ those classes — or, for single-line/config changes, the line itself.
   anyone, since debts can be owed by any agent type), once the debt is
   older than `environmentLandForcefulCollectionGraceTimesteps`, seizes
   whatever sugar/spice the debtor currently has (not limited to an
-  above-metabolism reserve) and pays it to the creditor.
-  *Locke, Sect. 19: "Thus a thief, whom I cannot harm, but by appeal to the law, for having stolen all that I am worth, I may kill, when he sets on me to rob me... because the law... permits me my own defence, and the right of war."*
+  above-metabolism reserve), but capped at the outstanding debt amount, and
+  pays it to the creditor.
+  *Two sections together, not one: Locke, Sect. 19 grounds why self-help force is legitimate at all here — "the want of such an appeal gives a man the right of war" — and there is no common judge/government in this simulation (Phase 2) to appeal to instead. Sect. 12 grounds why the seizure is capped rather than punitive: "each transgression may be punished to that degree, and with so much severity, as will suffice to make it an ill bargain to the offender, give him cause to repent." (An earlier version of this citation used only Sect. 19's thief-killing scenario, which is tonally mismatched with a calm, capped seizure after a grace period — Sect. 12 is the better fit for what the code actually does.)*
 - **`doTrading(self)`** (`784-788`) — Override that runs the base agent's
   ordinary sugar/spice trading first (`super().doTrading()`), then the
   three land-specific behaviors above in order: consent grants, buyouts,
@@ -134,7 +138,7 @@ those classes — or, for single-line/config changes, the line itself.
   children (co-ownership) or, if none exist, removes the deceased's share
   outright; forfeits the cell entirely if no owners remain afterward. Also
   discharges all of the deceased's outstanding debts/receivables.
-  *Locke, Sect. 72: "the possession of the father being the expectation and inheritance of the children, ordinarily in certain proportions, according to the law and custom of each country." Locke explicitly leaves the split mechanism to "law and custom," so the specific choice of an equal split among every living child is a design choice within a space Locke deliberately left open.*
+  *Locke, Sect. 72: "the possession of the father being the expectation and inheritance of the children, ordinarily in certain proportions, according to the law and custom of each country." This grounds the land-splitting half of this method — Locke explicitly leaves the split mechanism to "law and custom," so the specific choice of an equal split among every living child is a design choice within a space Locke deliberately left open. The debt-discharge half has no citation of its own: nothing in Chapter V says whether a reparation debt survives the debtor's or creditor's death, so wiping the ledger clean at death rather than transferring it to heirs is a plain design choice, not something Sect. 72 (or anything else read so far) actually covers.*
 - **`updateValues(self)`** (`841-844`) — Per-timestep hook (calls base
   `super().updateValues()`) that triggers `processLandAbandonment` and
   `settleDebtsVoluntarily` — the two behaviors that happen automatically
@@ -197,7 +201,7 @@ those classes — or, for single-line/config changes, the line itself.
   *Design choice (numeric value); the underlying concept is grounded in Sect. 38 — see `forfeitCellClaim` above.*
 - **`environmentLandForcefulCollectionGraceTimesteps: 1`** (line `84`, new
   key) — Matches the code default of `1`.
-  *Design choice — Locke specifies no time period at all before force becomes legitimate; see Sect. 19 under `doForcefulDebtCollection` above.*
+  *Design choice — Locke specifies no time period at all before force becomes legitimate; see Sect. 12/19 under `doForcefulDebtCollection` above.*
 
 ## `gui.py` — `class GUI` (only the touched lines)
 
@@ -228,7 +232,7 @@ those classes — or, for single-line/config changes, the line itself.
 - **`environmentLandForcefulCollectionGraceTimesteps` entry** (new) —
   Documents the grace-period config key, its Locke-only relevance, and its
   default of `1`.
-  *Design choice — documentation; see Sect. 19 under `doForcefulDebtCollection` above.*
+  *Design choice — documentation; see Sect. 12/19 under `doForcefulDebtCollection` above.*
 
 ## `examples/locke_basic.json` (new file, not a class)
 
