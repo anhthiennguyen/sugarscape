@@ -20,12 +20,12 @@ those classes — or, for single-line/config changes, the line itself.
 - **`cellConsentedAgents(self, cell)`** (`562-565`) — Lazily creates and
   returns `cell.consentedAgents`, the set of agents with standing harvest
   permission on that cell.
-  *Design choice — the co-owner voting data structure has no textual basis; Locke never describes joint ownership or how joint owners must agree.*
+  *Design choice — accessor plumbing for the consent concept grounded in Sect. 35/120 (see `doLandConsentGrants` below).*
 - **`cellConsentApprovals(self, cell)`** (`567-570`) — Lazily creates and
-  returns `cell.consentApprovals`, a `{candidate: {owners who voted yes}}`
-  dict tracking in-progress majority votes to admit a new consented
+  returns `cell.consentApprovals`, a `{candidate: {owners who have approved}}`
+  dict tracking in-progress unanimous-consent votes to admit a new consented
   harvester.
-  *Design choice — accessor plumbing.*
+  *Design choice — accessor plumbing; the unanimity rule itself is grounded in Sect. 35 (see `doLandConsentGrants` below).*
 - **`cellPendingViolations(self, cell)`** (`572-575`) — Lazily creates and
   returns `cell.pendingViolations`, the list of thefts not yet converted
   into debt.
@@ -93,12 +93,12 @@ those classes — or, for single-line/config changes, the line itself.
   *Locke, Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life."*
 - **`doLandConsentGrants(self)`** (`695-727`) — Runs every timestep for
   every cell the agent co-owns; for each agent adjacent to that cell not
-  yet consented, records this owner's approval vote, and once accumulated
-  approvals exceed 50% of ownership share, charges the candidate the cell's
-  current `sugar + spice` value (with a 50-metabolism-timestep reserve
-  buffer) split pro rata across all owners, then marks the candidate
-  consented.
-  *Locke, Sect. 120 lists "permission" alongside inheritance and purchase as a valid means by which another may come to enjoy land — grounding owner-granted consent in general; the majority-by-share voting mechanism and the fee formula are both design choices with no textual basis.*
+  yet consented, records this owner's approval vote, and once **every**
+  current owner has approved (unanimous, not share-weighted), charges the
+  candidate the cell's current `sugar + spice` value (with a
+  50-metabolism-timestep reserve buffer) split pro rata across all owners,
+  then marks the candidate consented.
+  *Locke, Sect. 35: "no one can inclose or appropriate any part [of commonly-held land], without the consent of all his fellow-commoners; because this is left common by compact." Sect. 120 separately grounds owner-granted "permission" as a valid means of land enjoyment in general. The fee formula and the 50-timestep reserve buffer are still design choices with no textual basis; the approval rule itself now matches Sect. 35's unanimity requirement rather than diverging from it.*
 - **`doLandBuyoutOffers(self)`** (`729-752`) — Runs every timestep; for
   every cell adjacent to the agent's current position that it doesn't
   itself own, if that cell lies outside the current owner's own foraging

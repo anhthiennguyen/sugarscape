@@ -707,8 +707,7 @@ class Locke(agent.Agent):
                     continue
                 candidateApprovals = approvals.setdefault(candidate, set())
                 candidateApprovals.add(self)
-                approvingShare = sum(owners.get(approver, 0) for approver in candidateApprovals)
-                if approvingShare <= 0.5:
+                if not set(owners.keys()) <= candidateApprovals:
                     continue
                 availableSugar = max(0, candidate.sugar - 50 * candidate.findSugarMetabolism())
                 availableSpice = max(0, candidate.spice - 50 * candidate.findSpiceMetabolism())
@@ -724,7 +723,7 @@ class Locke(agent.Agent):
                 consented.add(candidate)
                 del approvals[candidate]
                 if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} and co-owners grant land consent on ({claimedCell.x},{claimedCell.y}) to Agent {candidate.ID} for fee {round(fee, 2)} ({round(approvingShare * 100, 1)}% approval)")
+                    print(f"Agent {self.ID} and co-owners grant land consent on ({claimedCell.x},{claimedCell.y}) to Agent {candidate.ID} for fee {round(fee, 2)} (unanimous, {len(owners)} owner(s))")
 
     def doLandBuyoutOffers(self):
         for neighborCell in self.cell.neighbors.values():
