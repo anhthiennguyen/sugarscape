@@ -1912,6 +1912,7 @@ if __name__ == "__main__":
                      "environmentHeight": 50,
                      "environmentInGroupRaces": [],
                      "environmentLandDecayTimesteps": 50,
+                     "environmentLandForcefulCollectionGraceTimesteps": 1,
                      "environmentMaxCombatLoot": 0,
                      "environmentMaxRaces": 0,
                      "environmentMaxSpice": 0,

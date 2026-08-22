@@ -255,8 +255,26 @@ class Agent:
         if self.cell.environment.pollutionStart <= self.timestep <= self.cell.environment.pollutionEnd:
             self.cell.doSugarProductionPollution(sugarCollected)
             self.cell.doSpiceProductionPollution(spiceCollected)
+        self.recordLandTrespassIfOwned(sugarCollected, spiceCollected)
         self.cell.resetSugar()
         self.cell.resetSpice()
+
+    def recordLandTrespassIfOwned(self, sugarCollected, spiceCollected):
+        # Land claims are a "locke" decision model concept, but any agent type
+        # can trespass on claimed land, so this check has to live here rather
+        # than in ethics.Locke's own collectResourcesAtCell override.
+        owners = getattr(self.cell, "owners", None)
+        if not owners or self in owners or not any(owner.isAlive() == True for owner in owners):
+            return
+        self.cell.lastHarvestedTimestep = self.timestep
+        if self in getattr(self.cell, "consentedAgents", ()):
+            return
+        if not hasattr(self.cell, "pendingViolations"):
+            self.cell.pendingViolations = []
+        self.cell.pendingViolations.append({"trespasser": self, "cell": self.cell,
+                                             "amount": sugarCollected + spiceCollected, "timestep": self.timestep})
+        if "all" in self.debug or "agent" in self.debug:
+            print(f"Agent {self.ID} trespasses on claimed cell ({self.cell.x},{self.cell.y}), harvesting {round(sugarCollected + spiceCollected, 2)}")
 
     def defaultOnLoan(self, loan):
         for creditor in self.socialNetwork["creditors"]:

@@ -636,8 +636,6 @@ class Locke(agent.Agent):
 
     def collectResourcesAtCell(self):
         cell = self.cell
-        sugarHarvested = cell.sugar
-        spiceHarvested = cell.spice
         super().collectResourcesAtCell()
 
         owners = self.cellOwners(cell)
@@ -648,14 +646,6 @@ class Locke(agent.Agent):
                 self.acquireLandClaim(cell)
         elif self in owners:
             self.processReturnToOwnedLand(cell)
-        elif any(owner.isAlive() == True for owner in owners):
-            cell.lastHarvestedTimestep = self.timestep
-            if self not in self.cellConsentedAgents(cell):
-                violation = {"trespasser": self, "cell": cell,
-                             "amount": sugarHarvested + spiceHarvested, "timestep": self.timestep}
-                self.cellPendingViolations(cell).append(violation)
-                if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} trespasses on co-owned cell ({cell.x},{cell.y}), harvesting {round(violation['amount'], 2)}")
 
     def processReturnToOwnedLand(self, cell):
         cell.lastHarvestedTimestep = self.timestep
@@ -762,11 +752,13 @@ class Locke(agent.Agent):
                     print(f"Agent {self.ID} buys out Agent {targetOwner.ID}'s {round(share * 100, 1)}% share of cell ({neighborCell.x},{neighborCell.y}) for {round(price, 2)}")
 
     def doForcefulDebtCollection(self):
+        configuration = self.cell.environment.sugarscape.configuration
+        graceTimesteps = configuration["environmentLandForcefulCollectionGraceTimesteps"]
         for neighbor in self.cell.findNeighborAgents():
-            if neighbor is self or neighbor.isAlive() == False or not isinstance(neighbor, Locke):
+            if neighbor is self or neighbor.isAlive() == False:
                 continue
             for debt in list(self.agentLandDebtsOwed(neighbor)):
-                if self.timestep - debt["createdTimestep"] < 5:
+                if self.timestep - debt["createdTimestep"] < graceTimesteps:
                     continue
                 creditor = debt["creditor"]
                 if creditor.isAlive() == False:

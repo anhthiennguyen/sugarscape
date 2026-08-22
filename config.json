@@ -81,6 +81,7 @@
         "environmentHeight": 50,
         "environmentInGroupRaces": [0],
         "environmentLandDecayTimesteps": 3,
+        "environmentLandForcefulCollectionGraceTimesteps": 1,
         "environmentMaxCombatLoot": 2,
         "environmentMaxRaces": 3,
         "environmentMaxSpice": 4,
