@@ -1913,6 +1913,7 @@ if __name__ == "__main__":
                      "environmentInGroupRaces": [],
                      "environmentLandDecayTimesteps": 50,
                      "environmentLandForcefulCollectionGraceTimesteps": 1,
+                     "environmentLandTrustThresholdRange": [4, 8],
                      "environmentMaxCombatLoot": 0,
                      "environmentMaxRaces": 0,
                      "environmentMaxSpice": 0,

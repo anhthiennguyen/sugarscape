@@ -552,7 +552,11 @@ class Temperance(agent.Agent):
 class Locke(agent.Agent):
     def __init__(self, agentID, birthday, cell, configuration):
         super().__init__(agentID, birthday, cell, configuration)
-        self.locke = {"claims": [], "debtsReceivable": []}
+        scenarioConfiguration = cell.environment.sugarscape.configuration
+        thresholdRange = scenarioConfiguration["environmentLandTrustThresholdRange"]
+        self.locke = {"claims": [], "debtsReceivable": [], "trust": {},
+                       "trustThreshold": random.randint(thresholdRange[0], thresholdRange[1]),
+                       "government": None}
 
     def cellOwners(self, cell):
         if not hasattr(cell, "owners"):
@@ -763,6 +767,12 @@ class Locke(agent.Agent):
                 if creditor.isAlive() == False:
                     self.removeSettledDebt(debt)
                     continue
+                government = self.locke["government"]
+                if government is not None and creditor not in government:
+                    if "all" in self.debug or "agent" in self.debug:
+                        print(f"Agent {self.ID} is blocked from forcefully collecting on behalf of "
+                              f"Agent {creditor.ID}, who is not a fellow government member")
+                    continue
                 availableSugar = max(0, neighbor.sugar)
                 availableSpice = max(0, neighbor.spice)
                 seizure = min(debt["amount"], availableSugar + availableSpice)
@@ -780,11 +790,75 @@ class Locke(agent.Agent):
                 if debt["amount"] <= 0:
                     self.removeSettledDebt(debt)
 
+    def doTrustAccrual(self):
+        for claimedCell in self.locke["claims"]:
+            owners = self.cellOwners(claimedCell)
+            if self not in owners:
+                continue
+            thisTimestepTrespassers = {v["trespasser"] for v in self.cellPendingViolations(claimedCell)
+                                        if v["timestep"] == self.timestep}
+            for candidate in claimedCell.findNeighborAgents():
+                if candidate is self or candidate in owners or candidate.isAlive() == False:
+                    continue
+                if candidate in thisTimestepTrespassers:
+                    continue
+                self.increaseTrust(candidate, claimedCell)
+
+    def increaseTrust(self, candidate, cell):
+        trust = self.locke["trust"]
+        trust[candidate.ID] = trust.get(candidate.ID, 0) + 1
+        if "all" in self.debug or "agent" in self.debug:
+            print(f"Agent {self.ID} gains 1 trust point toward Agent {candidate.ID} for not stealing near "
+                  f"cell ({cell.x},{cell.y}) (trust {trust[candidate.ID]}/{self.locke['trustThreshold']})")
+        if isinstance(candidate, Locke):
+            self.attemptGovernmentFormation(candidate)
+
+    def attemptGovernmentFormation(self, other):
+        if self.locke["trust"].get(other.ID, 0) < self.locke["trustThreshold"]:
+            return
+        if other.locke["trust"].get(self.ID, 0) < other.locke["trustThreshold"]:
+            return
+        self.formOrJoinGovernmentWith(other)
+
+    def formOrJoinGovernmentWith(self, other):
+        myGovernment = self.locke["government"]
+        theirGovernment = other.locke["government"]
+        if myGovernment is not None and theirGovernment is not None:
+            if myGovernment is not theirGovernment and ("all" in self.debug or "agent" in self.debug):
+                print(f"Agent {self.ID} and Agent {other.ID} cross mutual trust thresholds, but each already "
+                      f"belongs to a different government; membership is exclusive, no merge occurs")
+            return
+        if myGovernment is not None:
+            self.addToGovernment(myGovernment, other)
+        elif theirGovernment is not None:
+            self.addToGovernment(theirGovernment, self)
+        else:
+            newGovernment = {self, other}
+            self.locke["government"] = newGovernment
+            other.locke["government"] = newGovernment
+            if "all" in self.debug or "agent" in self.debug:
+                print(f"Agent {self.ID} and Agent {other.ID} found a new government after mutual trust "
+                      f"crosses both thresholds")
+
+    def addToGovernment(self, government, newMember):
+        government.add(newMember)
+        newMember.locke["government"] = government
+        if "all" in self.debug or "agent" in self.debug:
+            memberIDs = sorted(member.ID for member in government)
+            print(f"Agent {newMember.ID} joins an existing government (no re-founding, members: {memberIDs})")
+
+    def resetTrustIn(self, violator):
+        if self.locke["trust"].get(violator.ID, 0) != 0:
+            self.locke["trust"][violator.ID] = 0
+            if "all" in self.debug or "agent" in self.debug:
+                print(f"Agent {self.ID}'s trust in Agent {violator.ID} resets to 0 after Agent {violator.ID}'s violation")
+
     def doTrading(self):
         super().doTrading()
         self.doLandConsentGrants()
         self.doLandBuyoutOffers()
         self.doForcefulDebtCollection()
+        self.doTrustAccrual()
 
     def findBestEthicalCell(self, cells, greedyBestCell=None):
         if len(cells) == 0:

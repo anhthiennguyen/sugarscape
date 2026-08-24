@@ -440,6 +440,11 @@ environmentLandForcefulCollectionGraceTimesteps: int
     Note: Only relevant to the "locke" decision model.
     Default: 1
 
+environmentLandTrustThresholdRange: [int, int]
+    Set the inclusive [min, max] range from which each Locke agent's own trust threshold is independently drawn at birth (both initial population and children born by reproduction; this value is not inherited from either parent). Once a Locke agent's trust toward another Locke agent reaches its own threshold in both directions simultaneously, the two may form or join a social contract (government).
+    Note: Only relevant to the "locke" decision model.
+    Default: [4, 8]
+
 environmentMaxCombatLoot: float
     Set the maximum reward agents receive from winning combat.
     Default: 0

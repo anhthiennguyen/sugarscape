@@ -23,8 +23,9 @@ class GUI:
         self.minVision = sugarscape.configuration["agentVision"][0]
         self.maxVision = sugarscape.configuration["agentVision"][1]
         visionColors = self.findColorRange("#FF0000", "#00FF00", self.minVision, self.maxVision)
-        self.colors = {"sugarAndSpice": sugarAndSpiceColors, "pollution": pollutionColors, "claimed": "#C87850", "healthy": "#3232FA", "sick": "#FA3232", "metabolism": metabolismColors, "movement": movementColors, "noSex": "#FA3232", "female": "#FA32FA", "male": "#3232FA", "vision": visionColors}
+        self.colors = {"sugarAndSpice": sugarAndSpiceColors, "pollution": pollutionColors, "claimed": "#C87850", "healthy": "#3232FA", "sick": "#FA3232", "metabolism": metabolismColors, "movement": movementColors, "noSex": "#FA3232", "female": "#FA32FA", "male": "#3232FA", "vision": visionColors, "noGovernment": "#888888"}
         self.palette = ["#FA3232", "#3232FA", "#32FA32", "#32FAFA", "#FA32FA", "#AA3232", "#3232AA", "#32AA32", "#32AAAA", "#AA32AA", "#FA8800", "#00FA88", "#8800FA", "#FA8888", "#8888FA", "#88FA88", "#FA3288", "#3288FA", "#88FA32", "#AA66AA", "#66AAAA", "#3ED06E", "#6E3ED0", "#D06E3E", "#000000"]
+        self.governmentColors = {}
         numTribes = self.sugarscape.configuration["environmentMaxTribes"]
         numDecisionModels = len(self.sugarscape.configuration["agentDecisionModels"])
         numRaces = self.sugarscape.configuration["environmentMaxRaces"]
@@ -77,7 +78,7 @@ class GUI:
         self.updateHighlightedCellStats()
 
     def configureAgentColorNames(self):
-        return ["Decision Models", "Depression", "Disease", "Metabolism", "Movement", "Races", "Sex", "Tribes", "Vision"]
+        return ["Decision Models", "Depression", "Disease", "Government", "Metabolism", "Movement", "Races", "Sex", "Tribes", "Vision"]
 
     def configureButtons(self, window):
         playButton = tkinter.Button(window, text="Play Simulation", command=self.doPlayButton)
@@ -597,6 +598,13 @@ class GUI:
 
         return colorRange
 
+    def findGovernmentColor(self, government):
+        governmentID = id(government)
+        if governmentID not in self.governmentColors:
+            index = len(self.governmentColors) % len(self.palette)
+            self.governmentColors[governmentID] = self.palette[index]
+        return self.governmentColors[governmentID]
+
     def findSugarAndSpiceColors(self, sugarColor, spiceColor):
         sugarRGB = self.hexToInt(sugarColor)
         spiceRGB = self.hexToInt(spiceColor)
@@ -672,6 +680,12 @@ class GUI:
             return self.colors["sick"] if agent.depressed == True else self.colors["healthy"]
         elif self.activeColorOptions["agent"] == "Disease":
             return self.colors["sick"] if agent.isSick() == True else self.colors["healthy"]
+        elif self.activeColorOptions["agent"] == "Government":
+            agentLocke = getattr(agent, "locke", None)
+            government = agentLocke.get("government") if agentLocke != None else None
+            if government != None:
+                return self.findGovernmentColor(government)
+            return self.colors["noGovernment"]
         elif self.activeColorOptions["agent"] == "Metabolism":
             return self.colors["metabolism"][self.clamp(agent.sugarMetabolism + agent.spiceMetabolism, self.minMetabolism, self.maxMetabolism)]
         elif self.activeColorOptions["agent"] == "Movement":

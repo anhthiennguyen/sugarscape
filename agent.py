@@ -277,6 +277,9 @@ class Agent:
                                              "amount": sugarCollected + spiceCollected, "timestep": self.timestep})
         if "all" in self.debug or "agent" in self.debug:
             print(f"Agent {self.ID} trespasses on claimed cell ({self.cell.x},{self.cell.y}), harvesting {round(sugarCollected + spiceCollected, 2)}")
+        for other in self.cell.environment.sugarscape.agents:
+            if other is not self and hasattr(other, "resetTrustIn"):
+                other.resetTrustIn(self)
 
     def defaultOnLoan(self, loan):
         for creditor in self.socialNetwork["creditors"]:
