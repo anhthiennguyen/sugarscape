@@ -279,14 +279,19 @@ those classes — or, for single-line/config changes, the line itself.
 
 ## `gui.py` — `class GUI` (only the touched lines)
 
-- **`self.colors`/`self.governmentColors`** (constructor, `~line 26-29`) —
-  Adds `"claimed": "#C87850"` (the tint color blended into a claimed cell's
-  normal color) and, Phase 2, `"noGovernment": "#888888"` (neutral gray for
-  any agent not currently in a government) plus `self.governmentColors =
-  {}`, an empty cache dict populated lazily the first time each government
-  is rendered (see `findGovernmentColor` below) — unlike tribes/races/
-  decision models, the number of governments isn't known ahead of time, so
-  their palette assignment can't be precomputed at GUI construction.
+- **`self.colors`/`self.governmentColors`/`self.landOwnerColors`**
+  (constructor, `~line 26-29`) — Adds, Phase 2, `"noGovernment": "#888888"`
+  (neutral gray for any agent not currently in a government) plus two empty
+  cache dicts, `self.governmentColors = {}` and `self.landOwnerColors =
+  {}`, each populated lazily the first time a given government/land owner
+  is rendered (see `findGovernmentColor`/`findOwnerColor` below) — unlike
+  tribes/races/decision models, neither the number of governments nor the
+  number of distinct land owners is known ahead of time, so their palette
+  assignments can't be precomputed at GUI construction. The original,
+  now-superseded `"claimed": "#C87850"` fixed-tint color (a single flat
+  color for any claimed cell, added when land claims were first
+  visualized) is removed — no longer referenced now that claimed cells are
+  colored per owner instead.
   *Design choice — visualization only.*
 - **`configureAgentColorNames(self)`** (`80-81`, Phase 2) — Adds
   `"Government"` to the list of selectable agent coloring modes.
@@ -302,19 +307,35 @@ those classes — or, for single-line/config changes, the line itself.
   replacing it — see `addToGovernment` in `ethics.py`). Assigns the next
   unused color from `self.palette`, cycling by modulo once every palette
   slot has been claimed by some other government.
-  *Design choice — visualization only; also the one place in this codebase that colors a dynamically-unbounded, run-time-discovered category rather than a fixed, config-known one (tribes/races/decision models all precompute their palette slice from a config-known count at GUI construction).*
+  *Design choice — visualization only; also one of two places in this codebase (the other being `findOwnerColor` below) that colors a dynamically-unbounded, run-time-discovered category rather than a fixed, config-known one (tribes/races/decision models all precompute their palette slice from a config-known count at GUI construction).*
+- **`findLandOwnerColor(self, owners)`** (new) — Takes a cell's `owners`
+  dict (`{agent: share}`) and returns a share-weighted average RGB across
+  every co-owner's own individual color (from `findOwnerColor`) — a
+  single-owner cell renders in exactly that owner's color; a co-owned cell
+  blends proportionally to each owner's share, generalizing the existing
+  two-color `interpolateColor` blend used elsewhere in this file (e.g.
+  sugar/spice coloring) to an arbitrary number of owners.
+  *Design choice — visualization only.*
+- **`findOwnerColor(self, owner)`** (new) — Assigns and caches one stable
+  color per land-owning agent, keyed directly on the agent object (agents
+  are already used as dict keys elsewhere in this codebase, e.g.
+  `cell.owners` itself, so no `id()`/`.ID` indirection is needed here
+  unlike `findGovernmentColor`), cycling through `self.palette` by modulo.
+  *Design choice — visualization only.*
 - **`lookupFillColor(self, cell)`** (`661-702`, one method with two added
   branches) — Adds an `elif` branch at `669-673` for when
   `activeColorOptions["environment"] == "Land Claims"`: colors an
   unoccupied cell by its normal sugar/spice color, blended 50% toward the
-  `"claimed"` tint if `len(cell.owners) > 0` — a binary claimed/unclaimed
-  check, not proportional to share count. Also adds (Phase 2) a branch at
-  `683-688` for `activeColorOptions["agent"] == "Government"`: duck-types
-  via `getattr(agent, "locke", None)` (this file doesn't import
-  `ethics.py` either) to find the agent's government, if any, and colors
-  it via `findGovernmentColor`; any agent without one — including every
-  non-Locke agent, which has no `.locke` at all — gets the neutral
-  `"noGovernment"` gray.
+  cell's owner-derived color from `findLandOwnerColor` if `len(cell.owners)
+  > 0` — different owners are now visually distinguishable from each other
+  (not just claimed vs. unclaimed, which is what this branch did before
+  this pass). Also adds (Phase 2) a branch at `683-688` for
+  `activeColorOptions["agent"] == "Government"`: duck-types via
+  `getattr(agent, "locke", None)` (this file doesn't import `ethics.py`
+  either) to find the agent's government, if any, and colors it via
+  `findGovernmentColor`; any agent without one — including every non-Locke
+  agent, which has no `.locke` at all — gets the neutral `"noGovernment"`
+  gray.
   *Design choice — visualization only.*
 
 ## `README` (documentation only, no behavior)
