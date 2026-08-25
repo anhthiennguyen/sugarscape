@@ -217,7 +217,7 @@ class GUI:
             self.highlightCell(self.highlightedCell)
 
     def configureEnvironmentColorNames(self):
-        return ["Land Claims", "Pollution"]
+        return ["Property", "Pollution"]
 
     def configureGraph(self):
         self.updateGraphDimensions()
@@ -680,7 +680,7 @@ class GUI:
         if agent == None:
             if self.activeColorOptions["environment"] == "Pollution":
                 return self.colors["pollution"][min(round(cell.pollution), 20)]
-            elif self.activeColorOptions["environment"] == "Land Claims":
+            elif self.activeColorOptions["environment"] == "Property":
                 baseColor = self.colors["sugarAndSpice"][cell.sugar][cell.spice]
                 owners = getattr(cell, "owners", {})
                 if len(owners) > 0:

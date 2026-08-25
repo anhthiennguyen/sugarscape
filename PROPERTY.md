@@ -296,7 +296,7 @@ those classes — or, for single-line/config changes, the line itself.
 - **`configureAgentColorNames(self)`** (`80-81`, Phase 2) — Adds
   `"Government"` to the list of selectable agent coloring modes.
   *Design choice — visualization only.*
-- **`configureEnvironmentColorNames(self)`** (`218`) — Adds `"Land Claims"`
+- **`configureEnvironmentColorNames(self)`** (`218`) — Adds `"Property"`
   to the list of selectable environment coloring modes, which previously
   only offered `"Pollution"`.
   *Design choice — visualization only.*
@@ -324,7 +324,7 @@ those classes — or, for single-line/config changes, the line itself.
   *Design choice — visualization only.*
 - **`lookupFillColor(self, cell)`** (`661-702`, one method with two added
   branches) — Adds an `elif` branch at `669-673` for when
-  `activeColorOptions["environment"] == "Land Claims"`: colors an
+  `activeColorOptions["environment"] == "Property"`: colors an
   unoccupied cell by its normal sugar/spice color, blended 50% toward the
   cell's owner-derived color from `findLandOwnerColor` if `len(cell.owners)
   > 0` — different owners are now visually distinguishable from each other
