@@ -440,10 +440,45 @@ environmentLandForcefulCollectionGraceTimesteps: int
     Note: Only relevant to the "locke" decision model.
     Default: 1
 
+environmentLandGovernmentReviewThreshold: float
+    Set the summed member grievance at which a Locke government reconvenes its legislative and re-votes its redistribution rule. The re-vote changes the rule only if the members' land holdings have shifted the land-rich/land-poor balance since it was last set; on a change, every member's grievance is multiplied by environmentLandGrievanceDecay.
+    Note: Only relevant to the "locke" decision model.
+    Default: 10.0
+
+environmentLandGrievanceDecay: float
+    Set the multiplier (0 to 1) applied to every member's grievance when a government re-legislates its redistribution rule in response to grievance.
+    Note: Only relevant to the "locke" decision model.
+    Default: 0.5
+
+environmentLandGrievanceThreshold: float
+    Set the cumulative grievance at which a Locke government member withdraws its consent and leaves the government. Grievance accrues each timestep a member ends the redistribution levy worse off than it went in (only the "proportional" rule can do this); leaving the government, or the rule changing to "equal", stops it.
+    Note: Only relevant to the "locke" decision model.
+    Default: 6.0
+
+environmentLandLevyFraction: float
+    Set the per-timestep levy each Locke government takes from its members as a fraction of the members' mean gross harvest. The levy is redistributed among members the same timestep - equally (each member refunded its own levy, net zero) or in proportion to claimed land (a transfer from the land-poor to the land-rich), per the government's voted redistribution rule.
+    Note: Only relevant to the "locke" decision model.
+    Default: 0.3
+
+environmentLandReparationRateChoices: [float, ...]
+    Set the menu of candidate reparation multipliers (each greater than 1.0) applied to a land trespass debt so that repayment costs the trespasser more than the amount taken. When two Locke agents found a government they hold a one-vote-each majority vote over this menu and the government adopts the median choice for the life of that government; later joiners are bound to it without a re-vote. A land owner not in a government sizes debts at the smallest choice.
+    Note: Only relevant to the "locke" decision model.
+    Default: [1.25, 1.5, 2.0, 3.0]
+
+environmentLandReparationStakeReference: int
+    Set the claimed-cell count at which a Locke agent votes for the harshest reparation rate on the menu; an agent holding fewer claimed cells votes proportionally lower, an agent holding this many or more votes for the maximum. Fixed reference so a vote is an absolute function of an agent's own holdings rather than a comparison to its co-founder.
+    Note: Only relevant to the "locke" decision model.
+    Default: 8
+
 environmentLandTrustThresholdRange: [int, int]
-    Set the inclusive [min, max] range from which each Locke agent's own trust threshold is independently drawn at birth (both initial population and children born by reproduction; this value is not inherited from either parent). Once a Locke agent's trust toward another Locke agent reaches its own threshold in both directions simultaneously, the two may form or join a social contract (government).
+    Set the inclusive [min, max] range from which each Locke agent's own trust threshold is independently drawn at birth (both initial population and children born by reproduction; this value is not inherited from either parent). When two governmentless Locke agents' trust toward each other each reaches its own threshold, the two found a social contract (government); a Locke agent whose trust toward a standing government member reaches its own threshold joins that member's government on its own consent alone.
     Note: Only relevant to the "locke" decision model.
     Default: [4, 8]
+
+environmentLandUseTollFactor: float
+    Set the per-harvest toll a non-member pays to harvest lawfully inside a Locke government's territory, as a fraction of what it harvested, when that government's land-use law is "toll". A government founded by members holding at least an average share of the territory votes "toll"; otherwise it votes "closed", under which a non-member's harvest in territory is a trespass with no lawful path. A non-member that cannot pay the toll in full trespasses instead.
+    Note: Only relevant to the "locke" decision model.
+    Default: 0.35
 
 environmentMaxCombatLoot: float
     Set the maximum reward agents receive from winning combat.

@@ -271,14 +271,55 @@ class Agent:
         # harvesting the cell does not, even repeatedly.
         if self in getattr(self.cell, "consentedAgents", ()):
             return
+        # Sect. 119: a non-member who enjoys "any part of the dominions of any
+        # government" is bound by that government's land-use law. Under "toll" a
+        # non-member may harvest lawfully by paying a per-harvest toll to the
+        # owners; under "closed" (and if the toll is unpayable) it is a trespass.
+        # Territory is derived - a cell belongs to the government of a living owner
+        # that has one.
+        territoryGovernment = None
+        for owner in owners:
+            ownerLocke = getattr(owner, "locke", None)
+            if ownerLocke is not None and owner.isAlive() == True and ownerLocke["government"] is not None:
+                territoryGovernment = ownerLocke["government"]
+                break
+        selfLocke = getattr(self, "locke", None)
+        selfIsMember = selfLocke is not None and selfLocke["government"] is territoryGovernment
+        if territoryGovernment is not None and not selfIsMember:
+            landUse = next(iter(territoryGovernment)).locke["governmentLandUse"]
+            harvested = sugarCollected + spiceCollected
+            tollFactor = self.cell.environment.sugarscape.configuration["environmentLandUseTollFactor"]
+            toll = harvested * tollFactor
+            if landUse == "toll" and toll > 0 and self.sugar + self.spice >= toll:
+                paidSugar = min(max(0.0, self.sugar), toll)
+                paidSpice = toll - paidSugar
+                self.sugar -= paidSugar
+                self.spice -= paidSpice
+                for owner, share in owners.items():
+                    owner.sugar += paidSugar * share
+                    owner.spice += paidSpice * share
+                if "all" in self.debug or "agent" in self.debug:
+                    print(f"Agent {self.ID} pays a land-use toll of {round(toll, 2)} to harvest in government territory at ({self.cell.x},{self.cell.y})")
+                return
         if not hasattr(self.cell, "pendingViolations"):
             self.cell.pendingViolations = []
+        # Snapshot the owner(s) and their shares at the moment of the trespass.
+        # Reparation is owed to whoever was wronged then (Sect. 11), not to
+        # whoever happens to own the cell when the debt is finally booked - the
+        # claim may have decayed and been re-taken (possibly by the trespasser)
+        # in between.
         self.cell.pendingViolations.append({"trespasser": self, "cell": self.cell,
-                                             "amount": sugarCollected + spiceCollected, "timestep": self.timestep})
+                                             "amount": sugarCollected + spiceCollected,
+                                             "timestep": self.timestep, "owners": dict(owners)})
         if "all" in self.debug or "agent" in self.debug:
             print(f"Agent {self.ID} trespasses on claimed cell ({self.cell.x},{self.cell.y}), harvesting {round(sugarCollected + spiceCollected, 2)}")
-        for other in self.cell.environment.sugarscape.agents:
-            if other is not self and hasattr(other, "resetTrustIn"):
+        # Sect. 94: trust is lost by those who perceive the trespass. Only agents
+        # adjacent to the trespassed cell witness it here; the owner learns of it
+        # later, when the violation is booked as a debt (Locke.convertViolationsToDebts).
+        # findNeighborAgents returns only the occupants of adjacent cells, never
+        # the centre cell's own agent, so the trespasser is never in this list.
+        for other in self.cell.findNeighborAgents():
+            if hasattr(other, "resetTrustIn"):
                 other.resetTrustIn(self)
 
     def defaultOnLoan(self, loan):
