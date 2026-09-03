@@ -435,7 +435,9 @@ government commit `9a70cff`); for that commit's original per-method citations se
 
 - **`self.colors`/`self.governmentColors`** (constructor, `~line 26-28`) —
   Adds `"noGovernment": "#888888"` (neutral gray for any agent not
-  currently in a government) and an empty `self.governmentColors = {}`
+  currently in a government), `"executor": "#FFB000"` and
+  `"governmentMember": "#00A0A0"` (the two flat tones for the Executor agent
+  mode), and an empty `self.governmentColors = {}`
   cache dict, populated lazily the first time a given government is
   rendered (see `findGovernmentColor` below) — unlike tribes/races/
   decision models, the number of governments isn't known ahead of time,
@@ -454,12 +456,12 @@ government commit `9a70cff`); for that commit's original per-method citations se
   unclaimed are now two flat tones, with no resource-level color ("the
   mountains") visible anywhere in this mode.
   *Design choice — visualization only.*
-- **`configureAgentColorNames(self)`** (`80-81`, Phase 2) — Adds
-  `"Government"` to the list of selectable agent coloring modes.
+- **`configureAgentColorNames(self)`** (`80-81`) — Adds `"Government"` (Phase 2)
+  and `"Executor"` (Phase 4) to the selectable agent coloring modes.
   *Design choice — visualization only.*
-- **`configureEnvironmentColorNames(self)`** (`218`) — Adds `"Property"`
-  to the list of selectable environment coloring modes, which previously
-  only offered `"Pollution"`.
+- **`configureEnvironmentColorNames(self)`** (`218`) — Adds `"Property"` and
+  `"Territory"` to the selectable environment coloring modes (previously only
+  `"Pollution"`).
   *Design choice — visualization only.*
 - **`findGovernmentColor(self, government)`** (new, Phase 2) — A
   government is a plain `set()`, which is unhashable, so this keys the
@@ -469,8 +471,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   unused color from `self.palette`, cycling by modulo once every palette
   slot has been claimed by some other government.
   *Design choice — visualization only; the one place in this codebase that colors a dynamically-unbounded, run-time-discovered category rather than a fixed, config-known one (tribes/races/decision models all precompute their palette slice from a config-known count at GUI construction).*
-- **`lookupFillColor(self, cell)`** (`661-699`, one method with two added
-  branches) — Has an `elif` branch at `669-671` for when
+- **`lookupFillColor(self, cell)`** (`661-717`, one method, several added
+  branches) — Has an `elif` branch for
   `activeColorOptions["environment"] == "Property"`: any claimed cell
   (`len(cell.owners) > 0`) renders as the flat `"claimed"` tint, any
   unclaimed cell as the flat `"unclaimed"` tint — a binary claimed/
@@ -491,17 +493,23 @@ government commit `9a70cff`); for that commit's original per-method citations se
   mode by mistake, then via a small marker dot layered on top) was also
   built and then reverted by request, in favor of keeping this method
   and every coloring mode's behavior exactly as simple as it looks here.
-  Also has a branch at `683-688` for `activeColorOptions["agent"] ==
-  "Government"`: duck-types via `getattr(agent, "locke", None)` (this
-  file doesn't import `ethics.py` either) to find the agent's government,
-  if any, and colors it via `findGovernmentColor`; any agent without one
-  — including every non-Locke agent, which has no `.locke` at all — gets
-  the neutral `"noGovernment"` gray. Selecting Property *and* Government
-  together still means an occupied, owned cell shows only the Government
-  color (agent branches take priority over environment branches when a
-  cell is occupied, unchanged, original behavior) — that's a known,
-  accepted limitation now, not something this method tries to solve.
-  *Design choice — visualization only.*
+  The **`"Government"` agent branch** duck-types via `getattr(agent, "locke",
+  None)` (this file doesn't import `ethics.py`) to find the agent's government
+  and colors it via `findGovernmentColor`; any agent without one — every
+  non-Locke agent included — gets the neutral `"noGovernment"` gray.
+  The **`"Executor"` agent branch** (Phase 4) is the same duck-typed lookup,
+  three flat tones: `"executor"` gold when `locke["governmentExecutor"] is
+  agent`, `"governmentMember"` teal for any other member, `"noGovernment"`
+  gray otherwise. The **`"Territory"` environment branch** (Phase 4) is the
+  Property branch with one extra step: for a claimed cell it walks
+  `cell.owners`, and if an owner has a government returns that government's
+  `findGovernmentColor` (so the same government's land and — under the
+  `"Government"` / `"Executor"` agent mode — its members read in the same
+  palette colour); a claimed but governmentless cell falls back to the flat
+  `"claimed"` tint, unclaimed to `"unclaimed"`. Selecting an environment
+  *and* an agent mode still shows only the agent colour on an occupied cell
+  (agent branches take priority — unchanged, original behaviour).
+  *Design choice — visualization only. `"Territory"` and `"Executor"` are new peer modes, not overlays on `"Property"` / `"Government"`; the two reverted elaborations above were about blending signals on one cell, which these do not do.*
 
 ## `README` (documentation only, no behavior)
 

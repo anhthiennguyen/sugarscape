@@ -43,6 +43,13 @@ class; a government is a bare `set()` of member agents).
   ones for entries you rewrite accurate, don't chase the rest.
 - `README`, `config.json`, `sugarscape.py`, `examples/locke_basic.json` — see
   config plumbing below.
+- `gui.py` — Tkinter viewer. Coloring modes (`configureAgentColorNames` /
+  `configureEnvironmentColorNames` + `lookupFillColor` branches) are kept **flat
+  and single-signal**: each mode fully replaces the cell colour, no blending with
+  the sugar/spice gradient, no two signals on one cell. Per-owner blending and a
+  Property+Government overlay were both built and reverted. New *peer* modes
+  (e.g. "Territory", "Executor") are fine; overlays are not. Locke state is read
+  duck-typed (`getattr(agent, "locke", None)`), `gui.py` does not import `ethics`.
 
 ### Recurring patterns
 
