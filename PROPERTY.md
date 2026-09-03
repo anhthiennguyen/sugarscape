@@ -32,16 +32,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `cell.owners` (a `{agent: share}` dict) the first time it's touched. The
   central accessor for reading ownership anywhere in the class.
   *Design choice — lazy accessor plumbing for the ownership concept grounded in Locke, Sect. 27: "every man has a property in his own person... the labour of his body, and the work of his hands, we may say, are properly his."*
-- **`cellConsentedAgents(self, cell)`** (`562-565`) — Lazily creates and
-  returns `cell.consentedAgents`, the set of agents with standing harvest
-  permission on that cell.
-  *Design choice — accessor plumbing for the consent concept grounded in Sect. 35/120 (see `doLandConsentGrants` below).*
-- **`cellConsentApprovals(self, cell)`** (`567-570`) — Lazily creates and
-  returns `cell.consentApprovals`, a `{candidate: {owners who have approved}}`
-  dict tracking in-progress unanimous-consent votes to admit a new consented
-  harvester.
-  *Design choice — accessor plumbing; the unanimity rule itself is grounded in Sect. 35 (see `doLandConsentGrants` below).*
-- **`cellPendingViolations(self, cell)`** (`572-575`) — Lazily creates and
+- **`cellPendingViolations(self, cell)`** (`569-572`) — Lazily creates and
   returns `cell.pendingViolations`, the list of thefts not yet converted
   into debt.
   *Design choice — accessor plumbing.*
@@ -50,31 +41,33 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `Locke` instances. This single line is what lets a non-`Locke` agent carry
   land debt at all.
   *Design choice — accessor plumbing; the underlying reparation debt it stores is grounded in Locke, Sect. 10 (see `convertViolationsToDebts` below).*
-- **`claimCellFor(self, cell, owner)`** (`586-590`) — Sets
-  `cell.owners = {owner: 1.0}` (100% single ownership), stamps
-  `lastHarvestedTimestep` to the current timestep, and resets
-  `consentedAgents`/`consentApprovals` to empty. The ownership-establishing
+- **`claimCellFor(self, cell, owner)`** (`579-581`) — Sets
+  `cell.owners = {owner: 1.0}` (100% single ownership) and stamps
+  `lastHarvestedTimestep` to the current timestep. The ownership-establishing
   primitive, used when a cell is first claimed. Does **not** touch
   `pendingViolations` — a trespass against a *prior* epoch's owner is still
   owed to that owner (see `convertViolationsToDebts`, which credits the
   snapshotted owner, not the current one), so wiping the list here would
   erase a legitimate outstanding claim whenever a decayed cell is re-taken.
   *Locke, Sect. 32: "As much land as a man tills, plants, improves, cultivates, and can use the product of, so much is his property. He by his labour does, as it were, inclose it from the common."*
-- **`forfeitCellClaim(self, cell)`** (`592-596`) — The inverse of
-  `claimCellFor`: wipes `cell.owners` back to `{}`, resets
-  `lastHarvestedTimestep` to `-1`, and clears consent state. Leaves
+- **`forfeitCellClaim(self, cell)`** (`583-585`) — The inverse of
+  `claimCellFor`: wipes `cell.owners` back to `{}` and resets
+  `lastHarvestedTimestep` to `-1`. Leaves
   `pendingViolations` in place for the same reason as `claimCellFor` — the
   wronged prior owner may still recover the debt if they (or anyone) re-touch
   the cell.
   *Locke, Sect. 38: "if either the grass of his enclosure rotted on the ground, or the fruit of his planting perished without gathering... this part of the earth, notwithstanding his enclosure, was still to be looked on as waste, and might be the possession of any other."*
-- **`convertViolationsToDebts(self, cell, timestep)`** (`598-631`) — For
+- **`convertViolationsToDebts(self, cell, timestep)`** (`587-624`) — For
   every pending violation on the cell, splits the stolen `amount` across the
   owners **snapshotted at trespass time** (`violation["owners"]`, falling back
   to current owners for pre-snapshot records) proportional to share, **scaled
   by a reparation rate above parity** — the crediting owner's `governmentRate`,
   or `min(choices)` from `environmentLandReparationRateChoices` for an owner
   not in a government. Skips any snapshotted owner who is the trespasser or is
-  no longer alive. Creates one debt record per (owner, trespasser) pair, files
+  no longer alive. Creates one debt record per (owner, trespasser) pair
+  (`creditor`, `debtor`, `cell`, `amount`, `createdTimestep`, and
+  `executorRecognized` — `False` until an executor's collection pass adjudicates
+  it, see `doForcefulDebtCollection`), files
   it on both the creditor's `debtsReceivable` and the debtor's `landDebtsOwed`,
   resets that owner's trust in the trespasser (moment of discovery), then
   clears `pendingViolations`.
@@ -113,7 +106,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
 - **`processLandAbandonment(self)`** (`656-670`) — Runs every timestep for
   every claim the agent holds; forfeits any cell the *owner* hasn't
   harvested in `environmentLandDecayTimesteps` steps, otherwise keeps it in
-  the agent's claims list. A trespasser or consented licensee harvesting the
+  the agent's claims list. A trespasser harvesting the
   cell does not reset this clock (see `recordLandTrespassIfOwned` in
   `agent.py` below) — a claim under continuous theft still decays.
   *Locke, Sect. 38 (see `forfeitCellClaim` above) grounds losing land through non-use; the specific numeric timestep threshold (`environmentLandDecayTimesteps`) is a design choice — Locke never puts a number on it.*
@@ -122,17 +115,6 @@ government commit `9a70cff`); for that commit's original per-method citations se
   above its own metabolic need (sugar first, then spice), removing the debt
   once fully paid. No proximity requirement.
   *Locke, Sect. 37: "the intrinsic value of things... depends only on their usefulness to the life of man," combined with Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life." Together these ground value as commensurable across different useful goods, but it's a stretched analogy: Locke's money is valuable specifically because it is NOT one of the perishable staples, whereas sugar and spice here are the staples themselves — the "same nominal value regardless of resource" rule has no tight single-passage match.*
-- **`doLandConsentGrants(self)`** (`695-727`) — Runs every timestep for
-  every cell the agent co-owns; for each agent adjacent to that cell not
-  yet consented, co-signs — there is no dissent path; an owner
-  unconditionally adds itself to the approval set every timestep it
-  processes the claim, with no cost-benefit check of any kind — and once
-  **every** current owner has signed on (unanimous, not share-weighted),
-  charges the
-  candidate the cell's current `sugar + spice` value (with a
-  50-metabolism-timestep reserve buffer) split pro rata across all owners,
-  then marks the candidate consented.
-  *Locke, Sect. 35: "no one can inclose or appropriate any part [of commonly-held land], without the consent of all his fellow-commoners; because this is left common by compact." Sect. 120 separately grounds owner-granted "permission" as a valid means of land enjoyment in general. The fee formula and the 50-timestep reserve buffer are still design choices with no textual basis; the approval rule itself now matches Sect. 35's unanimity requirement rather than diverging from it.*
 - **`doLandBuyoutOffers(self)`** (`729-752`) — Runs every timestep; for
   every cell adjacent to the agent's current position that it doesn't
   itself own, if that cell lies outside the current owner's own foraging
@@ -140,18 +122,29 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `(maxSugar + maxSpice) * share` (again with the 50-metabolism-timestep
   reserve buffer), paying directly and calling `transferShare`.
   *Locke, Sect. 120: "Whoever therefore, from thenceforth, by inheritance, purchase, permission, or otherways, enjoys any part of the land... must take it with the condition it is under." The buyout price formula itself is a design choice.*
-- **`doForcefulDebtCollection(self)`** (`782-843`) — Runs every timestep; for
+- **`doForcefulDebtCollection(self)`** (`726-784`) — Runs every timestep; for
   every neighboring agent, for every debt that neighbor owes older than
   `environmentLandForcefulCollectionGraceTimesteps`, seizes whatever
   sugar/spice the debtor holds (capped at the debt) and pays it to the
-  creditor — **but only if `self` is the creditor, or `self` is its
-  government's `governmentExecutor` and the creditor is a fellow member**.
-  A non-executor member does not collect for others; a governmentless agent
-  collects only its own. When a seizure lands on a `Locke` debtor its
-  `restrained` flag is set (Sect. 12). If the executor collects its *own* debt
-  in a step where a fellow member's enforceable one goes unreached, a
-  `Sect. 156` line is logged.
-  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds routing collection through that one office: members "engage their natural force... to assist the executive power of the society", not to freelance for one another. Sect. 156 grounds the neglect line — the executor's power is "a fiduciary trust... for the safety of the people", and self-collection while a fellow member's debt goes unreached is that trust visibly unfulfilled (not Sect. 222 — no property is taken). An earlier "member-visible ledger" version let every member collect for every fellow member; the executor supersedes it (Sect. 126's step Locke actually describes).*
+  creditor. The gate, in order: **`self` is the creditor** (ungated self-help);
+  or **`self` is its government's `governmentExecutor` and the creditor is a
+  fellow member**; or — new — **`self` is a non-executor member, the creditor
+  is a fellow member, the government has a sitting executor, and the debt is
+  already flagged `executorRecognized`**. Anything else falls through to a
+  "leaves … to the executor / its creditor" log and does nothing; a
+  governmentless agent still collects only its own. **Recognition**: whenever
+  the executor's own pass reaches a debt it is entitled to collect (its own, if
+  it is the executor; or any fellow member's), it stamps
+  `debt["executorRecognized"] = True` — the executive's adjudication that this
+  is a valid society debt to enforce — whether or not it can seize anything that
+  step (the debtor may be momentarily empty). The executor only encounters
+  debts of agents adjacent to it, so recognition spreads as it moves; the flag,
+  once set, persists on the debt record until the debt is settled. When a
+  seizure lands on a `Locke` debtor its `restrained` flag is set (Sect. 12). If
+  the executor collects its *own* debt in a step where a fellow member's
+  enforceable one goes unreached, a `Sect. 156` line is logged; an assisting
+  member's seizure log carries a `Sect. 130` marker.
+  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. Sect. 156 grounds the neglect line — the executor's power is "a fiduciary trust... for the safety of the people", and self-collection while a fellow member's debt goes unreached is that trust visibly unfulfilled (not Sect. 222 — no property is taken). An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes).*
 - **`doTrustAccrual(self)`** (`793-806`) — Runs every timestep for every
   cell the agent owns; every neighbor of that cell who is alive, not a
   co-owner, and didn't trespass on it *this* timestep earns one trust point
@@ -280,9 +273,9 @@ government commit `9a70cff`); for that commit's original per-method citations se
   owner when the violation is booked as a debt (in `convertViolationsToDebts`).
   Not the whole population.
   *Locke, Sect. 94: people act on what they perceive — "it hinders not men from feeling... when they perceive, that any man... is out of the bounds of the civil society which they are of". Instant grid-wide knowledge of a transgression is not perception. An earlier Phase 2 version reset every living Locke agent's trust at once, citing Sect. 8 ("a trespass against the whole species") — but Sect. 8 establishes only that the wrong concerns everyone, not that everyone learns of it. Sect. 11 grounds the owner carve-out: the injured party has a particular standing and finds out when the debt lands on the ledger, wherever they were standing. Zeroing the score rather than decaying it is a design choice.*
-- **`doTrading(self)`** (`1060-1067`) — Override that runs the base agent's
+- **`doTrading(self)`** (`1006-1012`) — Override that runs the base agent's
   ordinary trading first (`super().doTrading()`), then the land-specific
-  behaviours in order: consent grants, buyouts, forceful collection, trust
+  behaviours in order: buyouts, forceful collection, trust
   accrual, and `doGovernanceReview` (executor neglect + levy + withdrawal +
   re-legislation + executor replacement).
   *Design choice — pure call-sequencing wrapper.*
@@ -291,15 +284,14 @@ government commit `9a70cff`); for that commit's original per-method citations se
   via `findEthicalValueOfCell` and picks the highest-scoring one. This is
   what actually decides where a `Locke` agent moves each timestep.
   *Design choice — generic movement-selection architecture shared by every decision model in the codebase, not Locke-specific content.*
-- **`findEthicalValueOfCell(self, cell)`** (`937-953`) — Computes a cell's
+- **`findEthicalValueOfCell(self, cell)`** (`1027-1033`) — Computes a cell's
   attractiveness for the movement decision as `sugar + spice`, forced to `0`
-  when the cell is owned by another living agent and `self` has no standing
-  consent on it — and, if `self.locke["restrained"]` is set, to
+  when the cell is owned by another living agent — and, if
+  `self.locke["restrained"]` is set, to
   `-(sugar + spice) - 1` (negative, richer claims avoided harder). A Locke
   agent places no value on entering foreign land; a restrained one scores it
-  below its own worst legitimate option. A consented harvester
-  (`cellConsentedAgents`) and an owner on their own cell are unaffected either
-  way.
+  below its own worst legitimate option. An owner on their own cell is
+  unaffected either way.
   *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" — exclusion is the primary effect of property. Hard exclusion in the movement score, not a tunable discount; an unrestrained Locke agent still trespasses when every reachable cell scores 0 (boxed in by claims), and non-`Locke` agents (which never run this method) trespass freely — so the trespass → debt → reparation machinery stays exercised. Sect. 12: punishment serves "reparation and restraint" — the negative score is the restraint half, driving a previously-collected-from agent to enter claimed land only when literally every reachable cell belongs to someone else. Restricted to Locke agents (only they carry the flag); implemented for completeness — in practice Locke agents rarely trespass under hard exclusion, so it seldom fires. The exclusion is flat across agents — Sect. 27 excludes everyone's common right equally, not weighted by trust or shared government.*
 - **`doInheritance(self)`** (`1140-1179`) — Runs the base wealth-inheritance
   mechanic first, then splits/forfeits the deceased's land shares (Locke
@@ -332,9 +324,9 @@ government commit `9a70cff`); for that commit's original per-method citations se
   cell's resources are cleared for the next timestep.
   *Design choice — the insertion point (where in the base harvesting flow the check runs) is architecture, not textual content.*
 - **`recordLandTrespassIfOwned(self, sugarCollected, spiceCollected)`**
-  (`262-317`) — Generic (not `Locke`-specific) trespass detector: if the cell
-  has a living owner and `self` isn't one of them and isn't a consented
-  licensee, it would append a violation record to `cell.pendingViolations`
+  (`262-315`) — Generic (not `Locke`-specific) trespass detector: if the cell
+  has a living owner and `self` isn't one of them, it would append a
+  violation record to `cell.pendingViolations`
   (with a snapshot of the `owners` dict, so the eventual debt is credited to
   whoever was wronged then — see `convertViolationsToDebts`). **Territory
   interception first** (Sect. 119): a duck-typed loop over `owners`

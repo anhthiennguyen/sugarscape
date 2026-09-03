@@ -263,8 +263,6 @@ class Agent:
         owners = getattr(self.cell, "owners", None)
         if not owners or self in owners or not any(owner.isAlive() == True for owner in owners):
             return
-        if self in getattr(self.cell, "consentedAgents", ()):
-            return
         territoryGovernment = None
         for owner in owners:
             ownerLocke = getattr(owner, "locke", None)

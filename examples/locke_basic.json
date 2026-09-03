@@ -1,5 +1,5 @@
 {
-    "__README__": "Locke agents claim unowned cells under the Lockean labor-theory-of-property proviso, charge trespassers debts collectible on return or by force, sell consent/land to neighbors, and bequeath land to Locke heirs.",
+    "__README__": "Locke agents claim unowned cells under the Lockean labor-theory-of-property proviso, charge trespassers debts collectible on return or by force, sell land shares to neighbors, and bequeath land to Locke heirs.",
     "agentDecisionModelFactor": [1, 1],
     "agentDecisionModels": ["locke"],
     "agentFemaleInfertilityAge": [40, 50],

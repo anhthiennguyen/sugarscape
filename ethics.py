@@ -566,16 +566,6 @@ class Locke(agent.Agent):
             cell.owners = {}
         return cell.owners
 
-    def cellConsentedAgents(self, cell):
-        if not hasattr(cell, "consentedAgents"):
-            cell.consentedAgents = set()
-        return cell.consentedAgents
-
-    def cellConsentApprovals(self, cell):
-        if not hasattr(cell, "consentApprovals"):
-            cell.consentApprovals = {}
-        return cell.consentApprovals
-
     def cellPendingViolations(self, cell):
         if not hasattr(cell, "pendingViolations"):
             cell.pendingViolations = []
@@ -589,14 +579,10 @@ class Locke(agent.Agent):
     def claimCellFor(self, cell, owner):
         cell.owners = {owner: 1.0}
         cell.lastHarvestedTimestep = owner.timestep
-        cell.consentedAgents = set()
-        cell.consentApprovals = {}
 
     def forfeitCellClaim(self, cell):
         cell.owners = {}
         cell.lastHarvestedTimestep = -1
-        cell.consentedAgents = set()
-        cell.consentApprovals = {}
 
     def convertViolationsToDebts(self, cell, timestep):
         choices = cell.environment.sugarscape.configuration["environmentLandReparationRateChoices"]
@@ -613,7 +599,8 @@ class Locke(agent.Agent):
                 if debtAmount <= 0:
                     continue
                 debt = {"creditor": owner, "debtor": trespasser, "cell": cell,
-                        "amount": debtAmount, "createdTimestep": timestep}
+                        "amount": debtAmount, "createdTimestep": timestep,
+                        "executorRecognized": False}
                 owner.locke["debtsReceivable"].append(debt)
                 self.agentLandDebtsOwed(trespasser).append(debt)
                 if hasattr(owner, "resetTrustIn"):
@@ -711,39 +698,6 @@ class Locke(agent.Agent):
             if debt["amount"] <= 0:
                 self.removeSettledDebt(debt)
 
-    def doLandConsentGrants(self):
-        for claimedCell in self.locke["claims"]:
-            owners = self.cellOwners(claimedCell)
-            if self not in owners:
-                continue
-            fee = claimedCell.sugar + claimedCell.spice
-            if fee <= 0:
-                continue
-            consented = self.cellConsentedAgents(claimedCell)
-            approvals = self.cellConsentApprovals(claimedCell)
-            for candidate in claimedCell.findNeighborAgents():
-                if candidate is self or candidate in consented or candidate.isAlive() == False:
-                    continue
-                candidateApprovals = approvals.setdefault(candidate, set())
-                candidateApprovals.add(self)
-                if not set(owners.keys()) <= candidateApprovals:
-                    continue
-                availableSugar = max(0, candidate.sugar - 50 * candidate.findSugarMetabolism())
-                availableSpice = max(0, candidate.spice - 50 * candidate.findSpiceMetabolism())
-                if availableSugar + availableSpice < fee:
-                    continue
-                sugarPayment = min(availableSugar, fee)
-                spicePayment = fee - sugarPayment
-                candidate.sugar -= sugarPayment
-                candidate.spice -= spicePayment
-                for owner, share in owners.items():
-                    owner.sugar += sugarPayment * share
-                    owner.spice += spicePayment * share
-                consented.add(candidate)
-                del approvals[candidate]
-                if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} and co-owners grant land consent on ({claimedCell.x},{claimedCell.y}) to Agent {candidate.ID} for fee {round(fee, 2)} (unanimous, {len(owners)} owner(s))")
-
     def doLandBuyoutOffers(self):
         for neighborCell in self.cell.neighbors.values():
             owners = self.cellOwners(neighborCell)
@@ -783,13 +737,21 @@ class Locke(agent.Agent):
                     self.removeSettledDebt(debt)
                     continue
                 government = self.locke["government"]
+                executor = self.locke["governmentExecutor"]
+                selfIsExecutor = self is executor
+                creditorIsFellowMember = government is not None and creditor in government
+                assisting = False
                 if creditor is self:
-                    pass
-                elif government is not None and creditor in government and self is self.locke["governmentExecutor"]:
-                    pass
+                    if selfIsExecutor:
+                        debt["executorRecognized"] = True
+                elif creditorIsFellowMember and selfIsExecutor:
+                    debt["executorRecognized"] = True
+                elif (creditorIsFellowMember and executor is not None
+                      and debt.get("executorRecognized") == True):
+                    assisting = True
                 else:
                     if "all" in self.debug or "agent" in self.debug:
-                        target = "the executor" if government is not None and creditor in government else "its creditor"
+                        target = "the executor" if creditorIsFellowMember else "its creditor"
                         print(f"Agent {self.ID} leaves Agent {neighbor.ID}'s debt to Agent "
                               f"{creditor.ID} to {target}")
                     continue
@@ -806,8 +768,9 @@ class Locke(agent.Agent):
                 creditor.spice += seizeSpice
                 debt["amount"] -= seizure
                 if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} forcefully collects {round(seizure, 2)} from Agent {neighbor.ID} on behalf of Agent {creditor.ID} ({round(debt['amount'], 2)} remaining)")
-                    if creditor is self and government is not None and self is self.locke["governmentExecutor"]:
+                    role = " (assisting the executor, Sect. 130)" if assisting else ""
+                    print(f"Agent {self.ID} forcefully collects {round(seizure, 2)} from Agent {neighbor.ID} on behalf of Agent {creditor.ID}{role} ({round(debt['amount'], 2)} remaining)")
+                    if creditor is self and government is not None and selfIsExecutor:
                         neglected = next((member for member in government if member is not self and any(
                             d["debtor"].isAlive() and self.timestep - d["createdTimestep"] >= graceTimesteps
                             and d["debtor"].sugar + d["debtor"].spice > 0 for d in member.locke["debtsReceivable"])), None)
@@ -1042,7 +1005,6 @@ class Locke(agent.Agent):
 
     def doTrading(self):
         super().doTrading()
-        self.doLandConsentGrants()
         self.doLandBuyoutOffers()
         self.doForcefulDebtCollection()
         self.doTrustAccrual()
@@ -1065,7 +1027,7 @@ class Locke(agent.Agent):
     def findEthicalValueOfCell(self, cell):
         cellValue = cell.sugar + cell.spice
         owners = self.cellOwners(cell)
-        if len(owners) > 0 and self not in owners and any(owner.isAlive() == True for owner in owners) and self not in self.cellConsentedAgents(cell):
+        if len(owners) > 0 and self not in owners and any(owner.isAlive() == True for owner in owners):
             cellValue = 0
             if self.locke["restrained"] == True:
                 cellValue = -(cell.sugar + cell.spice) - 1
