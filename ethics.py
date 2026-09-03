@@ -558,7 +558,8 @@ class Locke(agent.Agent):
                        "trustThreshold": random.randint(thresholdRange[0], thresholdRange[1]),
                        "government": None, "governmentRate": None, "restrained": False,
                        "governmentLandUse": None, "governmentRedistribution": None,
-                       "grievance": 0.0, "lastHarvest": 0.0, "lastLevyTimestep": -1}
+                       "grievance": 0.0, "lastHarvest": 0.0, "lastLevyTimestep": -1,
+                       "governmentExecutor": None, "executorGrievance": 0.0}
 
     def cellOwners(self, cell):
         if not hasattr(cell, "owners"):
@@ -598,21 +599,13 @@ class Locke(agent.Agent):
         cell.consentApprovals = {}
 
     def convertViolationsToDebts(self, cell, timestep):
-        # self.cell is None here when called from doInheritance (the dead agent has
-        # already left its cell), so read config off the trespassed cell instead.
         choices = cell.environment.sugarscape.configuration["environmentLandReparationRateChoices"]
         for violation in self.cellPendingViolations(cell):
             trespasser = violation["trespasser"]
-            # Credit whoever owned the cell when the trespass happened (Sect. 11),
-            # not the current owner; fall back to current owners for any record
-            # written before this field existed.
             wrongedOwners = violation.get("owners") or self.cellOwners(cell)
             for owner, share in wrongedOwners.items():
                 if owner is trespasser or owner.isAlive() == False:
                     continue
-                # Reparation is sized above parity (Locke, Sect. 12: "an ill bargain
-                # to the offender"). The rate is the owner's government's voted rate,
-                # or the configured floor for an owner not in a government (Sect. 126).
                 rate = owner.locke.get("governmentRate")
                 if rate is None:
                     rate = min(choices)
@@ -623,9 +616,6 @@ class Locke(agent.Agent):
                         "amount": debtAmount, "createdTimestep": timestep}
                 owner.locke["debtsReceivable"].append(debt)
                 self.agentLandDebtsOwed(trespasser).append(debt)
-                # Sect. 11: the injured party has a particular standing, and learns
-                # of the trespass when it lands on the ledger - wherever the owner
-                # was standing when it happened. (owner is alive per the guard above.)
                 if hasattr(owner, "resetTrustIn"):
                     owner.resetTrustIn(trespasser)
                 if "all" in owner.debug or "agent" in owner.debug:
@@ -661,11 +651,8 @@ class Locke(agent.Agent):
 
     def collectResourcesAtCell(self):
         cell = self.cell
-        # Sect. 27 / Sect. 38: property is made and kept by gathering, not by
-        # standing on a cell. The parent resets the cell's resources at the end,
-        # so the harvest has to be measured before it runs.
         harvested = cell.sugar + cell.spice
-        self.locke["lastHarvest"] = harvested   # recorded every timestep, before the gate, for the levy pass
+        self.locke["lastHarvest"] = harvested
         super().collectResourcesAtCell()
         if harvested <= 0:
             return
@@ -795,18 +782,16 @@ class Locke(agent.Agent):
                 if creditor.isAlive() == False:
                     self.removeSettledDebt(debt)
                     continue
-                # Sect. 7: an agent always collects a debt owed to itself - that
-                # right is universal and gated by nothing. Sect. 130: government
-                # members also collect for one another, the shared ledger being
-                # the pooled executive power a government provides. A stranger's
-                # debt is simply not on this collector's ledger (cf. Sect. 94:
-                # an agent acts on what it knows) - not forbidden, just unknown.
                 government = self.locke["government"]
-                onLedger = creditor is self or (government is not None and creditor in government)
-                if not onLedger:
+                if creditor is self:
+                    pass
+                elif government is not None and creditor in government and self is self.locke["governmentExecutor"]:
+                    pass
+                else:
                     if "all" in self.debug or "agent" in self.debug:
+                        target = "the executor" if government is not None and creditor in government else "its creditor"
                         print(f"Agent {self.ID} leaves Agent {neighbor.ID}'s debt to Agent "
-                              f"{creditor.ID} alone - not on its ledger or a fellow member's")
+                              f"{creditor.ID} to {target}")
                     continue
                 availableSugar = max(0, neighbor.sugar)
                 availableSpice = max(0, neighbor.spice)
@@ -822,10 +807,12 @@ class Locke(agent.Agent):
                 debt["amount"] -= seizure
                 if "all" in self.debug or "agent" in self.debug:
                     print(f"Agent {self.ID} forcefully collects {round(seizure, 2)} from Agent {neighbor.ID} on behalf of Agent {creditor.ID} ({round(debt['amount'], 2)} remaining)")
-                # Sect. 12: punishment serves reparation AND restraint. A Locke
-                # agent that has had resources seized grows cautious - see
-                # findEthicalValueOfCell, where a restrained agent scores foreign
-                # land below even its worst legitimate option.
+                    if creditor is self and government is not None and self is self.locke["governmentExecutor"]:
+                        neglected = next((member for member in government if member is not self and any(
+                            d["debtor"].isAlive() and self.timestep - d["createdTimestep"] >= graceTimesteps
+                            and d["debtor"].sugar + d["debtor"].spice > 0 for d in member.locke["debtsReceivable"])), None)
+                        if neglected is not None:
+                            print(f"Agent {self.ID} the executor collects its own debt while Agent {neglected.ID}'s goes unreached (Sect. 156)")
                 if isinstance(neighbor, Locke) and neighbor.locke["restrained"] == False:
                     neighbor.locke["restrained"] = True
                     if "all" in neighbor.debug or "agent" in neighbor.debug:
@@ -857,44 +844,37 @@ class Locke(agent.Agent):
             self.attemptGovernmentFormation(candidate)
 
     def attemptGovernmentFormation(self, other):
-        # Called from increaseTrust with self = the agent whose trust toward other
-        # just crossed its own threshold, i.e. the potential joiner or founder.
         if self.locke["trust"].get(other.ID, 0) < self.locke["trustThreshold"]:
             return
         selfGovernment = self.locke["government"]
         otherGovernment = other.locke["government"]
         if selfGovernment is not None:
-            # Already incorporated: one government at a time, no merge.
             return
         if otherGovernment is not None:
-            # Joining an existing body needs only the joiner's own consent (Sect. 89).
             self.addToGovernment(otherGovernment, self)
             return
         if other.locke["trust"].get(self.ID, 0) < other.locke["trustThreshold"]:
-            # Founding a new body needs every founder's consent (Sect. 99).
             return
         newGovernment = {self, other}
         founders = [self, other]
         rate = self.voteReparationRate(founders)
         landUse = self.voteLandUse(founders)
         redistribution = self.voteRedistribution(founders)
+        executor = self.voteExecutor(founders)
         for founder in founders:
             founder.locke["government"] = newGovernment
             founder.locke["governmentRate"] = rate
             founder.locke["governmentLandUse"] = landUse
             founder.locke["governmentRedistribution"] = redistribution
+            founder.locke["governmentExecutor"] = executor
             founder.locke["grievance"] = 0.0
+            founder.locke["executorGrievance"] = 0.0
         if "all" in self.debug or "agent" in self.debug:
             print(f"Agent {self.ID} and Agent {other.ID} found a new government "
-                  f"(reparation rate {rate}, land use {landUse}, redistribution {redistribution}) "
-                  f"after mutual trust crosses both thresholds")
+                  f"(reparation rate {rate}, land use {landUse}, redistribution {redistribution}, "
+                  f"executor {executor.ID}) after mutual trust crosses both thresholds")
 
     def voteReparationRate(self, founders):
-        # Each founder backs one rate from the configured menu; its pick rises with
-        # its claimed-land count measured against a fixed reference (Sect. 138: the
-        # stake in property that government exists to protect). One equal vote each;
-        # the body adopts the median (Sect. 96), taking the lighter side of an even
-        # split since Sect. 12 only requires a rate above parity.
         configuration = self.cell.environment.sugarscape.configuration
         choices = sorted(configuration["environmentLandReparationRateChoices"])
         reference = configuration["environmentLandReparationStakeReference"]
@@ -906,50 +886,35 @@ class Locke(agent.Agent):
         return preferred[(len(preferred) - 1) // 2]
 
     def voteLandUse(self, members):
-        # The land-use law binding non-members in the territory (Sect. 124): a
-        # non-member may not harvest here at all ("closed") or may on payment of a
-        # toll ("toll"). A member holding at least an average share of the
-        # territory has toll income to gain and votes "toll"; a below-average
-        # holder is hurt more per incursion and votes to shut the door. Majority;
-        # tie -> "toll". Voted once, never re-legislated (Sect. 153).
         meanClaims = sum(len(member.locke["claims"]) for member in members) / len(members)
         votes = ["toll" if len(member.locke["claims"]) >= meanClaims else "closed" for member in members]
         return "toll" if votes.count("toll") >= votes.count("closed") else "closed"
 
     def voteRedistribution(self, members):
-        # How the per-timestep levy is paid back out (Sect. 138/139: the levy is
-        # itself a taking of property without the individual's consent). "equal"
-        # returns each member exactly its own levy - the power held, not abused.
-        # "proportional" pays out by land share, moving value from the land-poor to
-        # the land-rich (Sect. 199: "his own private separate advantage"). A member
-        # holding more than the government's average votes "proportional"; the rest
-        # vote "equal". Majority; tie -> "equal", the rule that cannot concentrate.
-        # An all-equal body has no one above the mean and stays "equal".
         meanClaims = sum(len(member.locke["claims"]) for member in members) / len(members)
         votes = ["proportional" if len(member.locke["claims"]) > meanClaims else "equal" for member in members]
         return "proportional" if votes.count("proportional") > votes.count("equal") else "equal"
 
+    def voteExecutor(self, members):
+        return max(members, key=lambda member: (member.findVision() + member.findMovement(), -member.ID))
+
     def addToGovernment(self, government, newMember):
         government.add(newMember)
         newMember.locke["government"] = government
-        # The joiner is bound to the laws the founders voted, without a re-vote
-        # (Sect. 97: incorporating obliges submission to the majority's determination).
         existingMember = next(member for member in government if member is not newMember)
         newMember.locke["governmentRate"] = existingMember.locke["governmentRate"]
         newMember.locke["governmentLandUse"] = existingMember.locke["governmentLandUse"]
         newMember.locke["governmentRedistribution"] = existingMember.locke["governmentRedistribution"]
+        newMember.locke["governmentExecutor"] = existingMember.locke["governmentExecutor"]
         newMember.locke["grievance"] = 0.0
+        newMember.locke["executorGrievance"] = 0.0
         if "all" in self.debug or "agent" in self.debug:
             memberIDs = sorted(member.ID for member in government)
             print(f"Agent {newMember.ID} joins an existing government (no re-founding, members: {memberIDs})")
-        # A changed roster is an occasion for the legislative to sit (Sect. 153):
-        # the rate and land-use laws are Sect. 97-frozen, but the redistribution
-        # rule tracks the body's current land-rich/land-poor balance.
         newMember.reviewRedistribution(government)
+        newMember.reviewExecutor(government)
 
     def reviewRedistribution(self, government):
-        # Re-run only the redistribution vote (Sect. 153); return whether the rule
-        # changed. Rate and land-use are not re-legislated.
         members = list(government)
         if len(members) < 2:
             return False
@@ -962,11 +927,20 @@ class Locke(agent.Agent):
             print(f"Agent {self.ID}'s government re-legislates redistribution to {newRule} (Sect. 153)")
         return True
 
+    def reviewExecutor(self, government):
+        members = list(government)
+        if len(members) < 2:
+            return False
+        newExecutor = self.voteExecutor(members)
+        if newExecutor is members[0].locke["governmentExecutor"]:
+            return False
+        for member in members:
+            member.locke["governmentExecutor"] = newExecutor
+        if "all" in self.debug or "agent" in self.debug:
+            print(f"Agent {self.ID}'s government re-appoints Agent {newExecutor.ID} as executor (Sect. 152)")
+        return True
+
     def territoryGovernmentFor(self, cell):
-        # A cell is in a government's territory iff a living owner of it belongs to
-        # that government (Sect. 119: the dominion is the members' land). Derived,
-        # not stored - it moves as claims are made and decay. Co-ownership across
-        # governments takes the first living owner's government.
         for owner in getattr(cell, "owners", {}):
             ownerLocke = getattr(owner, "locke", None)
             if ownerLocke is not None and owner.isAlive() and ownerLocke["government"] is not None:
@@ -974,9 +948,6 @@ class Locke(agent.Agent):
         return None
 
     def dissolveGovernmentIfUnviable(self, government):
-        # Sect. 211: a society dissolves when the body can no longer act as one,
-        # and fewer than two members is not a body. Survivors return to the state
-        # of nature; trust scores persist so they may re-found (Sect. 211's sequel).
         if government is None or len(government) >= 2:
             return
         for survivor in list(government):
@@ -984,15 +955,14 @@ class Locke(agent.Agent):
             survivor.locke["governmentRate"] = None
             survivor.locke["governmentLandUse"] = None
             survivor.locke["governmentRedistribution"] = None
+            survivor.locke["governmentExecutor"] = None
             survivor.locke["grievance"] = 0.0
+            survivor.locke["executorGrievance"] = 0.0
             if "all" in survivor.debug or "agent" in survivor.debug:
                 print(f"Agent {survivor.ID}'s government dissolves - fewer than two members remain (Sect. 211)")
         government.clear()
 
     def runLevyPass(self, government):
-        # Once per timestep per government (Sect. 138: a flat taking from every
-        # member's estate). Snapshot the roster so shuffled run-order and any
-        # same-timestep withdrawal do not change the denominator.
         members = [member for member in government if member.locke["lastLevyTimestep"] != self.timestep]
         if len(members) < len(government) or len(members) < 2:
             return
@@ -1017,7 +987,7 @@ class Locke(agent.Agent):
             elif redistribution == "proportional":
                 received = pool / len(members)
             else:
-                received = paid[member]   # "equal": each gets its own levy back, net-zero
+                received = paid[member]
             member.sugar += received
             net = received - paid[member]
             member.locke["grievance"] = max(0.0, member.locke["grievance"] - net)
@@ -1028,9 +998,18 @@ class Locke(agent.Agent):
             return
         self.runLevyPass(government)
         configuration = self.cell.environment.sugarscape.configuration
+        if self is not self.locke["governmentExecutor"]:
+            grace = configuration["environmentLandForcefulCollectionGraceTimesteps"]
+            neglectGrace = configuration["environmentLandExecutorNeglectGraceTimesteps"]
+            penalty = configuration["environmentLandExecutorNeglectPenalty"]
+            unenforced = sum(1 for debt in self.locke["debtsReceivable"]
+                             if debt["debtor"].isAlive()
+                             and self.timestep - (debt["createdTimestep"] + grace) >= neglectGrace
+                             and debt["debtor"].sugar + debt["debtor"].spice > 0)
+            if unenforced > 0:
+                self.locke["executorGrievance"] += penalty * unenforced
+
         if self.locke["grievance"] > configuration["environmentLandGrievanceThreshold"]:
-            # Sect. 240: the people are judge of whether the legislature has broken
-            # trust by turning the levy to a faction's advantage (Sect. 199/222).
             if "all" in self.debug or "agent" in self.debug:
                 print(f"Agent {self.ID} withdraws consent from its government after a long train of abuses (Sect. 240)")
             government.discard(self)
@@ -1038,18 +1017,22 @@ class Locke(agent.Agent):
             self.locke["governmentRate"] = None
             self.locke["governmentLandUse"] = None
             self.locke["governmentRedistribution"] = None
+            self.locke["governmentExecutor"] = None
             self.locke["grievance"] = 0.0
+            self.locke["executorGrievance"] = 0.0
             self.dissolveGovernmentIfUnviable(government)
+            if len(government) >= 2:
+                next(iter(government)).reviewExecutor(government)
             return
         if sum(member.locke["grievance"] for member in government) > configuration["environmentLandGovernmentReviewThreshold"]:
-            # Sect. 153: a failing law is an occasion for the legislative to sit.
-            # The re-vote reforms the rule only if the land-rich/land-poor balance
-            # has shifted since it was last set; otherwise it is a no-op and
-            # withdrawal is the course (Sect. 222-243: dissolution, not reform).
             if self.reviewRedistribution(government):
                 decay = configuration["environmentLandGrievanceDecay"]
                 for member in government:
                     member.locke["grievance"] *= decay
+        if sum(member.locke["executorGrievance"] for member in government) > configuration["environmentLandExecutorReviewThreshold"]:
+            if self.reviewExecutor(government):
+                for member in government:
+                    member.locke["executorGrievance"] = 0.0
 
     def resetTrustIn(self, violator):
         if self.locke["trust"].get(violator.ID, 0) != 0:
@@ -1083,16 +1066,7 @@ class Locke(agent.Agent):
         cellValue = cell.sugar + cell.spice
         owners = self.cellOwners(cell)
         if len(owners) > 0 and self not in owners and any(owner.isAlive() == True for owner in owners) and self not in self.cellConsentedAgents(cell):
-            # Sect. 27: a labour-made claim "excludes the common right of other
-            # men". A non-owner without consent places no value on entering it.
-            # Trespass can still happen - when an agent is boxed in by claims and
-            # every option scores 0, or via non-Locke agents that don't run this
-            # method - and the reparation rules then handle it.
             cellValue = 0
-            # Sect. 12 restraint: an agent that has already been collected from
-            # goes further, scoring foreign land below its worst legitimate
-            # option (richer claims avoided harder), so it enters claimed land
-            # only when every reachable cell belongs to someone else.
             if self.locke["restrained"] == True:
                 cellValue = -(cell.sugar + cell.spice) - 1
         return cellValue
@@ -1130,10 +1104,10 @@ class Locke(agent.Agent):
         if government is not None:
             government.discard(self)
             self.dissolveGovernmentIfUnviable(government)
-            # A death can shift the land-rich/land-poor balance - an occasion for
-            # the surviving legislative to re-vote the redistribution rule (Sect. 153).
             if len(government) >= 2:
-                next(iter(government)).reviewRedistribution(government)
+                survivor = next(iter(government))
+                survivor.reviewRedistribution(government)
+                survivor.reviewExecutor(government)
 
     def updateValues(self):
         super().updateValues()
