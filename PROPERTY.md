@@ -76,12 +76,6 @@ government commit `9a70cff`); for that commit's original per-method citations se
   or otherwise-discharged debt from both the creditor's `debtsReceivable`
   and the debtor's `landDebtsOwed` lists.
   *Design choice — ledger cleanup once reparation (Sect. 10) has already been satisfied; no distinct textual basis of its own.*
-- **`transferShare(self, cell, previousOwner, newOwner)`** (`619-629`) —
-  Moves one owner's entire share of a cell to a new owner: settles any
-  pending violations into debts first (so nothing is lost in the handoff),
-  then pops the share off the old owner and adds it to the new owner,
-  updating both agents' `locke["claims"]` lists. Used by buyouts.
-  *Design choice — internal share-moving primitive; the substantive "purchase" concept it serves is grounded in Sect. 120 (see `doLandBuyoutOffers` below).*
 - **`acquireLandClaim(self, cell)`** (`654-658`) — Thin wrapper calling
   `claimCellFor(cell, self)` and appending the cell to
   `self.locke["claims"]` — the actual "claim this cell" action, reached from
@@ -115,13 +109,6 @@ government commit `9a70cff`); for that commit's original per-method citations se
   above its own metabolic need (sugar first, then spice), removing the debt
   once fully paid. No proximity requirement.
   *Locke, Sect. 37: "the intrinsic value of things... depends only on their usefulness to the life of man," combined with Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life." Together these ground value as commensurable across different useful goods, but it's a stretched analogy: Locke's money is valuable specifically because it is NOT one of the perishable staples, whereas sugar and spice here are the staples themselves — the "same nominal value regardless of resource" rule has no tight single-passage match.*
-- **`doLandBuyoutOffers(self)`** (`729-752`) — Runs every timestep; for
-  every cell adjacent to the agent's current position that it doesn't
-  itself own, if that cell lies outside the current owner's own foraging
-  range, offers to buy that owner's share outright at
-  `(maxSugar + maxSpice) * share` (again with the 50-metabolism-timestep
-  reserve buffer), paying directly and calling `transferShare`.
-  *Locke, Sect. 120: "Whoever therefore, from thenceforth, by inheritance, purchase, permission, or otherways, enjoys any part of the land... must take it with the condition it is under." The buyout price formula itself is a design choice.*
 - **`doForcefulDebtCollection(self)`** (`726-784`) — Runs every timestep; for
   every neighboring agent, for every debt that neighbor owes older than
   `environmentLandForcefulCollectionGraceTimesteps`, seizes whatever
@@ -273,9 +260,9 @@ government commit `9a70cff`); for that commit's original per-method citations se
   owner when the violation is booked as a debt (in `convertViolationsToDebts`).
   Not the whole population.
   *Locke, Sect. 94: people act on what they perceive — "it hinders not men from feeling... when they perceive, that any man... is out of the bounds of the civil society which they are of". Instant grid-wide knowledge of a transgression is not perception. An earlier Phase 2 version reset every living Locke agent's trust at once, citing Sect. 8 ("a trespass against the whole species") — but Sect. 8 establishes only that the wrong concerns everyone, not that everyone learns of it. Sect. 11 grounds the owner carve-out: the injured party has a particular standing and finds out when the debt lands on the ledger, wherever they were standing. Zeroing the score rather than decaying it is a design choice.*
-- **`doTrading(self)`** (`1006-1012`) — Override that runs the base agent's
+- **`doTrading(self)`** (`969-973`) — Override that runs the base agent's
   ordinary trading first (`super().doTrading()`), then the land-specific
-  behaviours in order: buyouts, forceful collection, trust
+  behaviours in order: forceful collection, trust
   accrual, and `doGovernanceReview` (executor neglect + levy + withdrawal +
   re-legislation + executor replacement).
   *Design choice — pure call-sequencing wrapper.*

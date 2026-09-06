@@ -618,18 +618,6 @@ class Locke(agent.Agent):
         if debt in owedList:
             owedList.remove(debt)
 
-    def transferShare(self, cell, previousOwner, newOwner):
-        owners = self.cellOwners(cell)
-        if previousOwner not in owners:
-            return
-        self.convertViolationsToDebts(cell, self.timestep)
-        share = owners.pop(previousOwner)
-        if cell in previousOwner.locke["claims"]:
-            previousOwner.locke["claims"].remove(cell)
-        owners[newOwner] = owners.get(newOwner, 0) + share
-        if cell not in newOwner.locke["claims"]:
-            newOwner.locke["claims"].append(cell)
-
     def acquireLandClaim(self, cell):
         self.claimCellFor(cell, self)
         self.locke["claims"].append(cell)
@@ -697,31 +685,6 @@ class Locke(agent.Agent):
                 print(f"Agent {self.ID} voluntarily repays {round(payment, 2)} of land debt to Agent {creditor.ID} ({round(debt['amount'], 2)} remaining)")
             if debt["amount"] <= 0:
                 self.removeSettledDebt(debt)
-
-    def doLandBuyoutOffers(self):
-        for neighborCell in self.cell.neighbors.values():
-            owners = self.cellOwners(neighborCell)
-            for targetOwner, share in list(owners.items()):
-                if targetOwner is self or targetOwner.isAlive() == False:
-                    continue
-                if neighborCell == targetOwner.cell or neighborCell in targetOwner.cellsInRange:
-                    continue
-                price = (neighborCell.maxSugar + neighborCell.maxSpice) * share
-                if price <= 0:
-                    continue
-                availableSugar = max(0, self.sugar - 50 * self.findSugarMetabolism())
-                availableSpice = max(0, self.spice - 50 * self.findSpiceMetabolism())
-                if availableSugar + availableSpice < price:
-                    continue
-                sugarPayment = min(availableSugar, price)
-                spicePayment = price - sugarPayment
-                self.sugar -= sugarPayment
-                self.spice -= spicePayment
-                targetOwner.sugar += sugarPayment
-                targetOwner.spice += spicePayment
-                self.transferShare(neighborCell, targetOwner, self)
-                if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} buys out Agent {targetOwner.ID}'s {round(share * 100, 1)}% share of cell ({neighborCell.x},{neighborCell.y}) for {round(price, 2)}")
 
     def doForcefulDebtCollection(self):
         configuration = self.cell.environment.sugarscape.configuration
@@ -1005,7 +968,6 @@ class Locke(agent.Agent):
 
     def doTrading(self):
         super().doTrading()
-        self.doLandBuyoutOffers()
         self.doForcefulDebtCollection()
         self.doTrustAccrual()
         self.doGovernanceReview()
