@@ -812,9 +812,15 @@ class Locke(agent.Agent):
         return preferred[(len(preferred) - 1) // 2]
 
     def voteLandUse(self, members):
-        meanClaims = sum(len(member.locke["claims"]) for member in members) / len(members)
-        votes = ["toll" if len(member.locke["claims"]) >= meanClaims else "closed" for member in members]
-        return "toll" if votes.count("toll") >= votes.count("closed") else "closed"
+        configuration = self.cell.environment.sugarscape.configuration
+        choices = list(reversed(configuration["environmentLandUseChoices"]))
+        reference = configuration["environmentLandReparationStakeReference"]
+        preferred = []
+        for member in members:
+            stake = min(1.0, len(member.locke["claims"]) / reference) if reference > 0 else 0.0
+            preferred.append(choices[round(stake * (len(choices) - 1))])
+        preferred.sort(key=choices.index)
+        return preferred[(len(preferred) - 1) // 2]
 
     def voteRedistribution(self, members):
         meanClaims = sum(len(member.locke["claims"]) for member in members) / len(members)

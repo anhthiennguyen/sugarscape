@@ -490,10 +490,10 @@ environmentLandTrustThresholdRange: [int, int]
     Note: Only relevant to the "locke" decision model.
     Default: [4, 8]
 
-environmentLandUseTollFactor: float
-    Set the per-harvest toll a non-member pays to harvest lawfully inside a Locke government's territory, as a fraction of what it harvested, when that government's land-use law is "toll". A government founded by members holding at least an average share of the territory votes "toll"; otherwise it votes "closed", under which a non-member's harvest in territory is a trespass with no lawful path. A non-member that cannot pay the toll in full trespasses instead.
+environmentLandUseChoices: [str | float, ...]
+    Set the menu of land-use options a Locke government votes over at founding: "closed" (a non-member's harvest in territory is a trespass with no lawful path) or a per-harvest toll fraction a non-member pays to harvest lawfully. List from strictest to most lenient. When two Locke agents found a government they hold a one-vote-each majority vote over this menu (keyed to the same claimed-cell stake used for the reparation-rate vote, environmentLandReparationStakeReference) and the government adopts the median choice, favoring the more lenient of the two on a tie; later joiners are bound to it without a re-vote. A non-member that cannot pay the toll in full trespasses instead.
     Note: Only relevant to the "locke" decision model.
-    Default: 0.35
+    Default: ["closed", 0.5, 0.35, 0.2]
 
 environmentMaxCombatLoot: float
     Set the maximum reward agents receive from winning combat.

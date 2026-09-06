@@ -18,7 +18,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `environmentLandTrustThresholdRange`), `government` (the shared `set()`, or
   `None`), `governmentRate` (the reparation multiplier its government voted),
   `restrained` (the Sect. 12 restraint flag), `governmentLandUse`
-  (`"closed"`/`"toll"` — the Sect. 124 rule binding non-members in the
+  (`"closed"` or a per-harvest toll fraction, one entry from
+  `environmentLandUseChoices` — the Sect. 124 rule binding non-members in the
   territory), `governmentRedistribution` (`"equal"`/`"proportional"` — how the
   Sect. 138 levy is paid back out), `grievance` (`0.0`; cumulative net loss
   under `proportional`, the fuel for Sect. 240 withdrawal), `lastHarvest` (this
@@ -159,8 +160,9 @@ government commit `9a70cff`); for that commit's original per-method citations se
   consent alone. Otherwise, only if `other`'s trust toward `self` has also
   crossed `other`'s threshold, founds a new government — a bare `set()` — and
   votes **four** laws over the founders: `voteReparationRate` (the reparation
-  multiplier), `voteLandUse` (closed/toll), `voteRedistribution` (equal/
-  proportional), `voteExecutor` (who collects on the society's behalf). Zeros
+  multiplier), `voteLandUse` (closed, or a per-harvest toll price),
+  `voteRedistribution` (equal/proportional), `voteExecutor` (who collects on
+  the society's behalf). Zeros
   both founders' `grievance` and `executorGrievance`.
   *Locke, Sect. 95-99 grounds forming political society by mutual consent — "when any number of men have so consented to make one community or government, they are thereby presently incorporated" — and is why a government is a bare `set()`, not a class: nothing more than its members' collected consent. Sect. 99 grounds the bilateral requirement for **founding** (each founder consents); Sect. 89 grounds **joining** an existing body on the joiner's consent alone ("men being... by nature all free, equal, and independent, no one can be... subjected to the political power of another, without his own consent"). The one-government-at-a-time rule is a design choice — Sect. 121 is about a tacit consenter's freedom to leave versus an express consenter's binding, not about exclusivity.*
 - **`voteReparationRate(self, founders)`** (`892-906`) — Each founder's
@@ -170,12 +172,25 @@ government commit `9a70cff`); for that commit's original per-method citations se
   government adopts the median of the founders' preferred rates (lower of the
   two middle values for an even count). Stored as `governmentRate`.
   *Locke, Sect. 12 gives only a floor ("an ill bargain"), not a number, so the rate is set by collective decision. Sect. 95-96: one equal vote each, the body moving "whither the greater force carries it, which is the consent of the majority" — hence the median. Sect. 138 grounds keying the preference to holdings. The stake-reference constant and the choice menu are design choices.*
-- **`voteLandUse(self, members)`** (`908-918`) — The Sect. 124 standard binding
-  non-members in the territory. A member holding at least the government's mean
-  claim count votes `"toll"` (it has toll income to gain), the rest vote
-  `"closed"`; majority, tie → `"toll"`. Voted once at formation, never
-  re-legislated — Sect. 153's "legislated once" story holds for it.
-  *Locke, Sect. 119: one who enjoys "any part of the dominions of any government... is thereby bound to obey the laws of that government." The territory (union of members' claims) is the dominion, so a government can bind a non-member standing in it; under `"toll"` there is a lawful path (a per-harvest fee), under `"closed"` a non-member's harvest is categorically a trespass. Sect. 124 (government exists to protect property under "a standing rule") grounds this being a rule, not just a penalty. The mean-relative vote and the fee formula are design choices.*
+- **`voteLandUse(self, members)`** (`814-823`) — The Sect. 124 standard binding
+  non-members in the territory: a single vote over `environmentLandUseChoices`
+  (strictest to most lenient, `"closed"` first), structurally identical to
+  `voteReparationRate` — each member's preferred option is one entry from the
+  menu (read strict-to-lenient, then internally worked lenient-to-strict to
+  match the reparation vote's ascending-severity convention), picked by
+  `round(min(1.0, claims / environmentLandReparationStakeReference) *
+  (len(choices) - 1))`. The government adopts the median of the members'
+  preferred options (the more lenient of the two middle choices for an even
+  count). Voted once at formation, never re-legislated — Sect. 153's
+  "legislated once" story holds for it. Replaces the earlier two-law design
+  (a `"closed"`/`"toll"` binary plus a fixed `environmentLandUseTollFactor`
+  price) — that binary made land-use policy a law with only one value it ever
+  actually took across every founding (`"toll"`, invariably), which is not a
+  meaningful standard under Sect. 124; folding price into the same vote gives
+  the community a real, varying choice, and removes the second law's
+  dependency on the first ("the toll factor only matters if land-use is
+  toll").
+  *Locke, Sect. 119: one who enjoys "any part of the dominions of any government... is thereby bound to obey the laws of that government." The territory (union of members' claims) is the dominion, so a government can bind a non-member standing in it; a chosen price is a lawful path, `"closed"` makes a non-member's harvest categorically a trespass. Sect. 124 (government exists to protect property under "a standing rule") grounds this being a rule, not just a penalty. Sect. 12 gives reparation a floor, but nothing in Chapter VIII or IX characterizes what a toll condition should be — Sect. 96's majority-decides principle is the strongest fit precisely because the text is silent on the number: the community sets it, same as the reparation multiplier. Reusing `environmentLandReparationStakeReference` (rather than a dedicated constant) is a design choice — both votes key off the same "claimed-cell stake" concept.*
 - **`voteRedistribution(self, members)`** (`919-931`) — The contested law: how
   the per-timestep levy is paid back out. A member holding **strictly more**
   than the government's mean claim count votes `"proportional"`, the rest vote
@@ -311,7 +326,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   cell's resources are cleared for the next timestep.
   *Design choice — the insertion point (where in the base harvesting flow the check runs) is architecture, not textual content.*
 - **`recordLandTrespassIfOwned(self, sugarCollected, spiceCollected)`**
-  (`262-315`) — Generic (not `Locke`-specific) trespass detector: if the cell
+  (`262-299`) — Generic (not `Locke`-specific) trespass detector: if the cell
   has a living owner and `self` isn't one of them, it would append a
   violation record to `cell.pendingViolations`
   (with a snapshot of the `owners` dict, so the eventual debt is credited to
@@ -319,11 +334,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   interception first** (Sect. 119): a duck-typed loop over `owners`
   (`getattr(owner, "locke", None)["government"]`, no import of `ethics`) finds
   whether the cell is in a government's territory; if it is and `self` is not a
-  member and the government's `governmentLandUse` is `"toll"`, `self` is charged
-  `harvest * environmentLandUseTollFactor` (paid pro rata to the owners) — and
-  if `self` can pay it in full, the harvest is lawful and the method `return`s
-  with **no violation recorded**. `"closed"`, an unpayable toll, or a
-  non-territory cell fall through to the ordinary violation path. Non-`Locke`
+  member and the government's `governmentLandUse` is not `"closed"`, `self` is
+  charged `harvest * governmentLandUse` (the voted price itself, paid pro rata
+  to the owners) — and if `self` can pay it in full, the harvest is lawful and
+  the method `return`s with **no violation recorded**. `"closed"`, an unpayable
+  toll, or a non-territory cell fall through to the ordinary violation path. Non-`Locke`
   agents pay tolls too (they hold sugar/spice) but the levy/grievance machinery
   never touches them. Deliberately does **not** touch
   `lastHarvestedTimestep` — only the owner's own harvest resets the
@@ -362,7 +377,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `"environmentLandReparationRateChoices": [1.25, 1.5, 2.0, 3.0]`,
   `"environmentLandReparationStakeReference": 8`,
   `"environmentLandTrustThresholdRange": [4, 8]`, and
-  `"environmentLandUseTollFactor": 0.35`.
+  `"environmentLandUseChoices": ["closed", 0.5, 0.35, 0.2]`.
   This is load-bearing: the config-file-override loop
   (`for opt in configuration: if opt in options: ...`) only applies a
   `config.json` value for a key that *already exists* in this dict — a key
@@ -371,6 +386,17 @@ government commit `9a70cff`); for that commit's original per-method citations se
   it was tried, before this dict entry was added — the trust-threshold key
   was added here from the start to avoid repeating it.)
   *Design choice — Python config-plumbing; see the note on why all three dict entries are load-bearing.*
+- **`verifyConfiguration(configuration)`** (`~1534-1554`) — Adds
+  `orderSignificant = ["environmentLandUseChoices"]` and skips this function's
+  generic `configValue.sort()` for any key in it. Every other list-valued
+  config option gets blind-sorted here regardless of decision model — harmless
+  for `environmentLandReparationRateChoices` (numeric, and `voteReparationRate`
+  re-sorts it anyway) but fatal for `environmentLandUseChoices`: it mixes
+  `str` (`"closed"`) with `float`, which Python's `list.sort()` can't compare,
+  and the list's *order* is itself meaningful (index position encodes
+  strict-to-lenient rank for `voteLandUse`) — sorting it would either crash
+  every run regardless of decision model, or silently scramble the menu.
+  *Design choice — Python config-validation plumbing, no textual content.*
 
 ## `config.json` (`sugarscapeOptions`, value/key changes only)
 
@@ -389,21 +415,21 @@ government commit `9a70cff`); for that commit's original per-method citations se
   key) — Matches the code default of `1`.
   *Design choice — Locke specifies no time period at all before force becomes legitimate; see Sect. 12/19 under `doForcefulDebtCollection` above.*
 - **`environmentLandReparationRateChoices: [1.25, 1.5, 2.0, 3.0]`** /
-  **`environmentLandReparationStakeReference: 8`** (new keys) — Match the code
-  defaults; the menu a government votes over and the claim count that maps to
-  the harshest choice.
-  *Design choice (the menu and the reference constant); the above-parity requirement is Sect. 12 and the vote is Sect. 95-96 — see `voteReparationRate` above.*
-- **The governance tuning keys** — `environmentLandUseTollFactor` (`0.35`),
+  **`environmentLandReparationStakeReference: 8`** / **`environmentLandUseChoices:
+  ["closed", 0.5, 0.35, 0.2]`** (new keys) — Match the code defaults; the
+  reparation-rate menu, the claim count that maps to its harshest choice (also
+  the stake reference the land-use vote reuses), and the land-use menu itself.
+  *Design choice (the menus and the reference constant); the above-parity requirement is Sect. 12 and both votes are Sect. 95-96 — see `voteReparationRate` / `voteLandUse` above.*
+- **The governance tuning keys** —
   `environmentLandLevyFraction` (`0.9`), `environmentLandGrievanceThreshold`
   (`10.0`), `environmentLandGovernmentReviewThreshold` (`10.0`),
   `environmentLandGrievanceDecay` (`0.5`), and the three executor keys
   `environmentLandExecutorNeglectGraceTimesteps` (`5`),
   `environmentLandExecutorNeglectPenalty` (`0.5`),
-  `environmentLandExecutorReviewThreshold` (`15.0`). Toll well below `1.0` so
-  `"toll"` and `"closed"` differ; the rest tuned against 250-step debug runs so
-  that withdrawal (levy grievance) is a recurring minority event and executor
-  replacement fires on roster churn — Sect. 225/230.
-  *Design choices (all the numbers); the mechanisms are Sect. 119/124 (toll), Sect. 138/199 (levy), Sect. 240 (withdrawal), Sect. 126/152/156 (executor) — see `voteLandUse` / `voteRedistribution` / `voteExecutor` / `doGovernanceReview` above.*
+  `environmentLandExecutorReviewThreshold` (`15.0`); tuned against 250-step
+  debug runs so that withdrawal (levy grievance) is a recurring minority event
+  and executor replacement fires on roster churn — Sect. 225/230.
+  *Design choices (all the numbers); the mechanisms are Sect. 138/199 (levy), Sect. 240 (withdrawal), Sect. 126/152/156 (executor) — see `voteRedistribution` / `voteExecutor` / `doGovernanceReview` above.*
 - **`environmentLandTrustThresholdRange: [1, 1]`** (new key) — Overrides the
   code default `[4, 8]` down for this scenario, so trust accrues fast and
   governments grow to many members — which the redistribution/rebellion
@@ -511,12 +537,13 @@ government commit `9a70cff`); for that commit's original per-method citations se
   *Design choice — documentation; see `voteExecutor` / `reviewExecutor` above.*
 - **`environmentLandReparationRateChoices` / `environmentLandReparationStakeReference`
   entries** (new) — Document the reparation-rate menu, the founding vote, the
-  lone-owner floor, and the stake reference; both Locke-only.
+  lone-owner floor, and the stake reference (also reused by the land-use vote);
+  both Locke-only.
   *Design choice — documentation; see `voteReparationRate` above.*
-- **`environmentLandUseTollFactor` / `environmentLandLevyFraction` /
+- **`environmentLandUseChoices` / `environmentLandLevyFraction` /
   `environmentLandGrievanceThreshold` / `environmentLandGovernmentReviewThreshold`
-  / `environmentLandGrievanceDecay` entries** (new) — Document the toll fraction,
-  the levy fraction, and the three grievance thresholds; all Locke-only.
+  / `environmentLandGrievanceDecay` entries** (new) — Document the land-use
+  menu, the levy fraction, and the three grievance thresholds; all Locke-only.
   *Design choice — documentation; see `voteLandUse` / `voteRedistribution` / `doGovernanceReview` above.*
 - **`environmentLandTrustThresholdRange` entry** (new) —
   Documents the trust-threshold-range config key, that it's independently
@@ -531,7 +558,7 @@ A standalone, runnable example scenario for the `locke` decision model, with
 its own `__README__` summary field. Notable settings distinct from the main
 `config.json`: `agentInheritancePolicy: "children"`,
 `environmentLandDecayTimesteps: 10`, `environmentLandTrustThresholdRange: [1, 2]`,
-and the reparation / toll / levy / grievance / executor keys set to the same
+and the reparation / land-use / levy / grievance / executor keys set to the same
 values as the main config so the governance machinery is exercised when the
 example is run.
 

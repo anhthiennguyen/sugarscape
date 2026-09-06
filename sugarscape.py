@@ -1538,6 +1538,7 @@ def verifyConfiguration(configuration):
     negativesAllowed += ["environmentAgeistAbsoluteRanges", "environmentAgeistRelativeRange", "environmentEquator", "environmentPollutionDiffusionTimeframe", "environmentPollutionTimeframe", "environmentMaxSpice", "environmentMaxSugar"]
     negativesAllowed += ["interfaceHeight", "interfaceWidth", "seed", "timesteps"]
     timeframes = ["diseaseTimeframe", "environmentPollutionDiffusionTimeframe", "environmentPollutionTimeframe"]
+    orderSignificant = ["environmentLandUseChoices"]
     negativeFlag = 0
     for configName, configValue in configuration.items():
         if isinstance(configValue, list):
@@ -1546,7 +1547,7 @@ def verifyConfiguration(configuration):
             configType = type(configValue[0])
             if configName in timeframes:
                 configuration[configName] = sortConfigurationTimeframes(configuration, configName)
-            else:
+            elif configName not in orderSignificant:
                 configValue.sort()
             if configName not in negativesAllowed and (configType == int or configType == float):
                 for i in range(len(configValue)):
@@ -1923,7 +1924,7 @@ if __name__ == "__main__":
                      "environmentLandReparationRateChoices": [1.25, 1.5, 2.0, 3.0],
                      "environmentLandReparationStakeReference": 8,
                      "environmentLandTrustThresholdRange": [4, 8],
-                     "environmentLandUseTollFactor": 0.35,
+                     "environmentLandUseChoices": ["closed", 0.5, 0.35, 0.2],
                      "environmentMaxCombatLoot": 0,
                      "environmentMaxRaces": 0,
                      "environmentMaxSpice": 0,

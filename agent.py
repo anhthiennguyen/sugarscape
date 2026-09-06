@@ -274,9 +274,8 @@ class Agent:
         if territoryGovernment is not None and not selfIsMember:
             landUse = next(iter(territoryGovernment)).locke["governmentLandUse"]
             harvested = sugarCollected + spiceCollected
-            tollFactor = self.cell.environment.sugarscape.configuration["environmentLandUseTollFactor"]
-            toll = harvested * tollFactor
-            if landUse == "toll" and toll > 0 and self.sugar + self.spice >= toll:
+            toll = harvested * landUse if landUse != "closed" else 0
+            if landUse != "closed" and toll > 0 and self.sugar + self.spice >= toll:
                 paidSugar = min(max(0.0, self.sugar), toll)
                 paidSpice = toll - paidSugar
                 self.sugar -= paidSugar
