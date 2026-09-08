@@ -576,6 +576,7 @@ class Locke(agent.Agent):
         super().doTrading()
         self.doForcefulDebtCollection()
         self.doTrustAccrual()
+        self.doLandConsentGrants()
         self.doGovernanceReview()
 
     def findBestEthicalCell(self, cells, greedyBestCell=None):
@@ -608,13 +609,28 @@ class Locke(agent.Agent):
             return None
         return min(collectible, key=lambda debt: debt["createdTimestep"])["debtor"]
 
+    def isDesperate(self):
+        return (self.sugar - self.findSugarMetabolism() < 0) or (self.spice - self.findSpiceMetabolism() < 0)
+
     def findEthicalValueOfCell(self, cell, pursuitTarget=None):
         cellValue = cell.sugar + cell.spice
         owners = self.cellOwners(cell)
         if len(owners) > 0 and self not in owners and any(owner.isAlive() == True for owner in owners):
-            cellValue = 0
-            if self.locke["restrained"] == True:
+            if self.isDesperate():
+                pass  # desperation overrides exclusion and restraint alike - see below
+            elif self.locke["restrained"] == True:
                 cellValue = -(cell.sugar + cell.spice) - 1
+            else:
+                territoryGovernment = self.territoryGovernmentFor(cell)
+                isMember = territoryGovernment is not None and self.locke["government"] is territoryGovernment
+                landUse = None if territoryGovernment is None else next(iter(territoryGovernment)).locke["governmentLandUse"]
+                if territoryGovernment is not None and not isMember and landUse is not None and landUse != "closed":
+                    # Lawful toll-paying access (Sect. 119/124, see recordLandTrespassIfOwned in
+                    # agent.py) - the same discount that toll actually costs at harvest time, so
+                    # movement scoring doesn't treat payable land as worthless as closed land.
+                    cellValue = cellValue * (1 - landUse)
+                else:
+                    cellValue = 0
         if pursuitTarget is not None:
             configuration = self.cell.environment.sugarscape.configuration
             weight = configuration["environmentLandExecutorPursuitWeight"]
@@ -647,18 +663,54 @@ class Locke(agent.Agent):
 
         owners = self.cellOwners(cell)
         if len(owners) == 0:
-            nearbyCells = self.findCellsInRange(newCell=cell)
-            unclaimedNearbyCellExists = any(len(self.cellOwners(nearby)) == 0 for nearby in nearbyCells)
-            if unclaimedNearbyCellExists:
+            configuration = self.cell.environment.sugarscape.configuration
+            maxClaims = configuration["environmentLandMaxClaimsPerAgent"]
+            if len(self.locke["claims"]) < maxClaims and self.leavesEnoughForNeighbors(cell):
                 self.acquireLandClaim(cell)
         elif self in owners:
             self.processReturnToOwnedLand(cell)
+
+    def leavesEnoughForNeighbors(self, cell):
+        ranges = [self.findCellsInRange(newCell=cell)]
+        ranges += [neighbor.findCellsInRange() for neighbor in self.cell.findNeighborAgents()]
+        for cellsInRange in ranges:
+            if not any(candidate is not cell and len(self.cellOwners(candidate)) == 0
+                       for candidate in cellsInRange):
+                return False
+        return True
 
     def processReturnToOwnedLand(self, cell):
         cell.lastHarvestedTimestep = self.timestep
         self.convertViolationsToDebts(cell, self.timestep)
         if "all" in self.debug or "agent" in self.debug:
             print(f"Agent {self.ID} returns to co-owned cell ({cell.x},{cell.y})")
+
+    def doLandConsentGrants(self):
+        configuration = self.cell.environment.sugarscape.configuration
+        decayThreshold = configuration["environmentLandDecayTimesteps"]
+        maxClaims = configuration["environmentLandMaxClaimsPerAgent"]
+        riskThreshold = decayThreshold / 2
+        for claimedCell in list(self.locke["claims"]):
+            owners = self.cellOwners(claimedCell)
+            if self not in owners:
+                continue
+            if self.timestep - claimedCell.lastHarvestedTimestep < riskThreshold:
+                continue
+            candidates = [neighbor for neighbor in self.cell.findNeighborAgents()
+                          if neighbor.isAlive() and neighbor not in owners
+                          and getattr(neighbor, "locke", None) is not None
+                          and len(neighbor.locke["claims"]) < maxClaims
+                          and self.locke["trust"].get(neighbor.ID, 0) >= self.locke["trustThreshold"]]
+            if len(candidates) == 0:
+                continue
+            newCoOwner = max(candidates, key=lambda neighbor: self.locke["trust"].get(neighbor.ID, 0))
+            evenShare = 1.0 / (len(owners) + 1)
+            for owner in owners:
+                owners[owner] = evenShare
+            owners[newCoOwner] = evenShare
+            newCoOwner.locke["claims"].append(claimedCell)
+            if "all" in self.debug or "agent" in self.debug:
+                print(f"Agent {self.ID} grants Agent {newCoOwner.ID} co-ownership of cell ({claimedCell.x},{claimedCell.y}) to guard it against decay (Sect. 28)")
 
     def processLandAbandonment(self):
         configuration = self.cell.environment.sugarscape.configuration

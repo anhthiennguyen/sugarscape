@@ -510,6 +510,11 @@ environmentLandLevyFractionChoices: [float, ...]
     Note: Only relevant to the "locke" decision model.
     Default: [0.1, 0.3, 0.5, 0.7, 0.9]
 
+environmentLandMaxClaimsPerAgent: int
+    Set the maximum number of cells a single Locke agent may hold claimed at once. A non-zero harvest on an unclaimed cell only creates a new claim if the agent's current claim count is below this limit (and the "enough, and as good left" proviso check also passes) - already holding the maximum blocks acquiring another cell outright, though the agent still keeps harvesting and returning to the land it already holds. Does not force forfeiture of existing claims above the limit if it's lowered after they were acquired; only gates new acquisition.
+    Note: Only relevant to the "locke" decision model.
+    Default: 1
+
 environmentLandReparationRateChoices: [float, ...]
     Set the menu of candidate reparation multipliers (each greater than 1.0) applied to a land trespass debt so that repayment costs the trespasser more than the amount taken. When two Locke agents found a government, each founder's own claimed-cell count is ranked by quantile against the founding pair's own distribution to pick one menu entry, and the government adopts the median of the two choices for the life of that government (favoring the milder choice on a tie); later joiners are bound to it without a re-vote. A land owner not in a government sizes debts at the smallest choice.
     Note: Only relevant to the "locke" decision model.

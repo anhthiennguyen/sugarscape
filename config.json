@@ -1,7 +1,7 @@
 {
     "__README__": "Default values for helper scripts. Details can be found in the README.",
     "dataCollectionOptions": {
-        "decisionModels": [["none"]],
+        "decisionModels": [["locke"]],
         "numParallelSimJobs": 1,
         "numSeeds": 100,
         "plots": ["deaths", "giniCoefficient", "happiness", "lifeExpectancy", "population", "sickness", "tradeVolume", "ttl", "wealth"],
@@ -14,7 +14,7 @@
         "agentAggressionFactor": [1, 1],
         "agentBaseInterestRate": [0.05, 0.10],
         "agentConditions": ["none"],
-        "agentDecisionModels": ["locke", "bentham", "egoist", "asimov"],
+        "agentDecisionModels": ["locke"],
         "agentDecisionModelAgeismFactor": [-1, -1],
         "agentDecisionModelFactor": [1, 1],
         "agentDecisionModelLookaheadDiscount": [0.5, 0.5],
@@ -96,6 +96,7 @@
         "environmentLandLegislatureGrievanceThreshold": 6.0,
         "environmentLandLegislatureSize": 1,
         "environmentLandLevyFractionChoices": [0.1, 0.3, 0.5, 0.7, 0.9],
+        "environmentLandMaxClaimsPerAgent": 1,
         "environmentLandReparationRateChoices": [1.25, 1.5, 2.0, 3.0],
         "environmentLandReparationStakeReference": 8,
         "environmentLandTrustThresholdRange": [1, 1],

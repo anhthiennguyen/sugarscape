@@ -101,28 +101,127 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `self.locke["claims"]` — the actual "claim this cell" action, reached from
   `collectResourcesAtCell` only after a non-zero harvest.
   *Locke, Sect. 27/28: property is made from what a man "removes out of the state that nature hath provided" — "that labour... added something to them more than nature... and so they became his private right." No removal, no claim; the harvest gate in `collectResourcesAtCell` is what enforces this.*
-- **`collectResourcesAtCell(self)`** (`662-680`) — Override of the base
+- **`collectResourcesAtCell(self)`** (`656-669`) — Override of the base
   harvesting method. Captures `cell.sugar + cell.spice` **before**
   `super().collectResourcesAtCell()` (the parent zeroes the cell at the end,
   so the amount can't be read afterwards), records it as
   `self.locke["lastHarvest"]` every timestep — before the gate, so a
   no-harvest timestep records `0.0` and is not levied on a stale value — then
   **returns immediately if nothing was harvested**. Only on a non-zero harvest
-  does it dispatch: claim an unclaimed cell if unclaimed land still exists
-  nearby, or, if `self` is already an owner, call `processReturnToOwnedLand`.
-  *Locke, Sect. 27 (claim creation) and Sect. 38 (claim retention) both key on gathering, not presence — "if... the fruit of his planting perished without gathering... this part of the earth, notwithstanding his enclosure, was still to be looked on as waste." Standing on a depleted cell is not gathering, so it neither creates nor refreshes a claim. The dispatch targets each carry their own citation.*
+  does it dispatch: claim an unclaimed cell if `self` is currently below
+  `environmentLandMaxClaimsPerAgent` **and** `leavesEnoughForNeighbors`
+  says the proviso is satisfied — both conditions, not either — or, if
+  `self` is already an owner, call `processReturnToOwnedLand`. The cap
+  check runs first (cheaper to evaluate than the proviso, which scans
+  every cell-adjacent neighbor's own vision range) but either one alone
+  blocks the claim; an agent already at its cap is not stopped from
+  gathering here, only from *claiming* it — the harvest itself, and the
+  spoilage-proviso consequences of one already at the cap, are
+  unaffected. **Fixed finding**: before the cap existed, a single agent
+  could accumulate many scattered claims over its lifetime with nothing
+  bounding how many — an empirical trace found individual agents holding
+  up to 12 simultaneous claims, with the population average climbing
+  toward 7-8 within the first 30 timesteps of a typical run. A decisive
+  ablation (disabling claim acquisition outright, leaving every other
+  Locke mechanic active) dropped a 30-seed extinction rate from 94% to
+  17% — *below* the `"none"`-model baseline of 45% — isolating
+  unconstrained property accumulation, not any of the other mechanics, as
+  the dominant driver of Locke's excess mortality relative to a no-ethics
+  population. Capping accumulation per agent, rather than removing
+  claiming outright, is the version of that finding that keeps exclusive
+  property itself intact.
+  *Locke, Sect. 27 (claim creation) and Sect. 38 (claim retention) both key on gathering, not presence — "if... the fruit of his planting perished without gathering... this part of the earth, notwithstanding his enclosure, was still to be looked on as waste." Standing on a depleted cell is not gathering, so it neither creates nor refreshes a claim. Sect. 36 grounds the cap itself: "no man's labour could subdue, or appropriate all; nor could his enjoyment consume more than a small part; so that it was impossible for any man, this way, to intrench upon the right of another" — Locke's own argument for why unbounded appropriation shouldn't happen is that one person's labor and consumption naturally can't stretch that far; a hard cap makes that boundary explicit in a model where an agent's vision, movement, and lifespan let it wander far past what it could plausibly use. The specific cap value is a design choice — Locke names no number, only the qualitative bound. The dispatch targets each carry their own further citation.*
+- **`leavesEnoughForNeighbors(self, cell)`** (`673-680`) — The "enough, and
+  as good" proviso check gating claim creation. Requires an unclaimed
+  alternative (other than `cell` itself, since the check runs *before*
+  `cell` is claimed and would otherwise still read as unclaimed) within
+  **both** `self`'s own vision-and-movement range (`findCellsInRange`,
+  capped by whichever is smaller) **and** every cell-adjacent neighbor's
+  own range (`neighbor.findCellsInRange()`, computed from *their* current
+  cell, unaffected by `self`'s hypothetical claim). If any one of them —
+  `self` included — would be left with nothing else reachable, the claim
+  is refused and the harvest still happened (Sect. 38's gathering already
+  occurred) but creates no new exclusion. **Fixed finding, replacing a
+  self-only check**: the original implementation asked only whether
+  `self` had an unclaimed alternative nearby, never whether the claim
+  would leave a neighbor boxed in. A 100-seed run of `config.json`'s
+  pure-`"locke"` population (with the `findEthicalValueOfCell` toll-fix
+  above already applied) still showed the large majority of seeds going
+  extinct well before timestep 500, while a matched `"none"`-model
+  baseline over the identical seeds went extinct in less than half as
+  many; a decisive ablation — disabling claim acquisition outright while
+  leaving every other Locke mechanic (trust, government, the levy, debt
+  collection) active — dropped the extinction rate *below* the `"none"`
+  baseline, isolating property exclusion itself, not any of those other
+  mechanics, as the dominant cause. That result sits in real tension with
+  Locke's own claim: Sect. 37 argues enclosure "does not lessen but
+  increase the common stock of mankind," not shrink the population able
+  to live off it — a self-only proviso check licenses claiming almost
+  anywhere as long as the claimant personally has *some* unclaimed
+  fallback, which let the map fragment into a fine patchwork (roughly a
+  third of all cells claimed within the first 10 timesteps of a typical
+  run) long before land was actually scarce for the population as a
+  whole, walling off far more forageable land than a genuine "enough and
+  as good left for others" test would ever license. Checking every
+  adjacent neighbor's own range, not just the claimant's, is a much
+  closer reading of "for others" specifically. See the verification
+  section of this change for the full before/after seed comparison.
+  *Locke, Sect. 27: property claiming is licensed "at least where there is enough, and as good left in common for others" — the clause is explicitly about the position of others, not solely the claimant's own remaining options, which is exactly what the self-only version missed. Sect. 33 restates the same qualifier ("as good left, as before"). Cell-adjacency as the "who counts as an affected other" boundary, and each such neighbor's own vision-and-movement range as the measure of "enough... left," are both design choices — Locke names no radius or population for either; the choice mirrors the same range concept `findCellsInRange` already uses for the claimant, so the same standard applies whether asking "is this too little for me" or "is this too little for someone else."*
 - **`processReturnToOwnedLand(self, cell)`** (`679-683`) — Re-stamps
   `lastHarvestedTimestep` and calls `convertViolationsToDebts` — the "owner
   comes back and gathers from land that was stolen from" moment. Only reached
   after a non-zero harvest (see `collectResourcesAtCell`), so an owner parked
   on an exhausted cell no longer holds the claim against `processLandAbandonment`.
   *Design choice — the specific "wait until the owner returns" timing is invented; the reparation right it triggers is grounded in Sect. 10, and the harvest gate in Sect. 38 (see `collectResourcesAtCell`). Consequence: pending violations on a claim the owner only ever revisits without gathering are not booked until someone next harvests the cell (still credited to the snapshotted victim via `convertViolationsToDebts`), or are lost if the claim decays first — consistent with an abandoning owner forfeiting the claim going forward.*
-- **`processLandAbandonment(self)`** (`656-670`) — Runs every timestep for
+- **`doLandConsentGrants(self)`** (`688-712`) — Runs every timestep (called
+  from `doTrading`, alongside the other per-timestep Locke passes) for
+  every claim `self` still holds. If less than half of
+  `environmentLandDecayTimesteps` has elapsed since the cell was last
+  harvested, does nothing — the claim isn't at meaningful risk yet. Once
+  it's past that halfway point, looks among `self`'s cell-adjacent
+  neighbors for anyone `self` trusts at least as much as its own
+  `trustThreshold` (the identical bar `attemptGovernmentFormation` uses
+  for founding/joining a government) who is **not** already an owner and
+  is currently **below** `environmentLandMaxClaimsPerAgent` themselves —
+  picks the single most-trusted such neighbor, if any, and re-splits the
+  cell evenly among all current owners plus the new one, adding the cell
+  to the new co-owner's own `claims` list. **Deliberately gated on the
+  candidate's own claims cap**, the same one `collectResourcesAtCell`
+  enforces for ordinary acquisition — a consent grant is still a way of
+  coming to hold land, and letting it bypass the cap would make it a
+  backdoor around the very limit `environmentLandMaxClaimsPerAgent`
+  exists to enforce. Once granted, the new co-owner is a genuine owner
+  going forward (not a mere licensee) — `self not in owners` is now false
+  for them everywhere that matters (trespass detection, movement
+  valuation), and *either* owner independently harvesting or returning to
+  the cell resets the shared `lastHarvestedTimestep`, which is the actual
+  point: a claim with two owners only decays if *neither* of them ever
+  tends it, not if just one of them happens to wander off.
+  **Combined verification, all five fixes/additions together** (toll
+  valuation, the neighbor-vision proviso, the per-agent claims cap,
+  desperation, and this grant mechanic): a full 100-seed run of
+  `config.json`'s pure-`"locke"` population to timestep 500 came back
+  **67/100 surviving** (median final population 948, from a starting 250)
+  against **33/100 extinct** (median extinction at timestep 183) — a
+  reversal from the 94-100% extinction rate measured for each earlier,
+  partial version of this fix, and better than the matched `"none"`
+  (no-ethics) baseline's 55% survival rate over the identical 100 seeds.
+  The per-agent claims cap (see `collectResourcesAtCell` above) was
+  already shown by itself to be the dominant lever (94%→17% extinction
+  in isolation, better than baseline on its own); desperation and this
+  grant mechanic were added afterward per direct request rather than
+  as further diagnosed fixes, and were verified together with everything
+  else in this one combined run rather than each in its own isolated
+  ablation.
+  *Locke, Sect. 28: what a man has removed from the common state "he hath mixed his labour with, and joined to it something that is his own, and thereby makes it his property" — property is his to dispose of by consent, which grounds an owner's standing to share it at all; no passage licenses a specific split ratio or a specific trigger for when to share, both of which are design choices. Sect. 38 grounds the actual motivation named here — losing a claim entirely to non-use is the harm being hedged against, so sharing it with someone able to tend it when `self` cannot is a direct response to that same spoilage risk, not an unrelated added mechanic. The trust-threshold reuse (rather than a separate parameter) is a design choice — Locke gives no basis for a different bar between "trust enough to found a government with" and "trust enough to co-own one plot with," so this treats them as the same kind of judgment.*
+- **`processLandAbandonment(self)`** (`715-729`) — Runs every timestep for
   every claim the agent holds; forfeits any cell the *owner* hasn't
   harvested in `environmentLandDecayTimesteps` steps, otherwise keeps it in
   the agent's claims list. A trespasser harvesting the
   cell does not reset this clock (see `recordLandTrespassIfOwned` in
-  `agent.py` below) — a claim under continuous theft still decays.
+  `agent.py` below) — a claim under continuous theft still decays; a
+  claim under **co-ownership** does not, as long as any one owner tends
+  it (see `doLandConsentGrants` above).
   *Locke, Sect. 38 (see `forfeitCellClaim` above) grounds losing land through non-use; the specific numeric timestep threshold (`environmentLandDecayTimesteps`) is a design choice — Locke never puts a number on it.*
 - **`settleDebtsVoluntarily(self)`** (`672-693`) — Runs every timestep; for
   every debt the agent owes, pays down as much as it can from sugar/spice
@@ -528,10 +627,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   owner when the violation is booked as a debt (in `convertViolationsToDebts`).
   Not the whole population.
   *Locke, Sect. 94: people act on what they perceive — "it hinders not men from feeling... when they perceive, that any man... is out of the bounds of the civil society which they are of". Instant grid-wide knowledge of a transgression is not perception. An earlier Phase 2 version reset every living Locke agent's trust at once, citing Sect. 8 ("a trespass against the whole species") — but Sect. 8 establishes only that the wrong concerns everyone, not that everyone learns of it. Sect. 11 grounds the owner carve-out: the injured party has a particular standing and finds out when the debt lands on the ledger, wherever they were standing. Zeroing the score rather than decaying it is a design choice.*
-- **`doTrading(self)`** (`969-973`) — Override that runs the base agent's
+- **`doTrading(self)`** (`575-580`) — Override that runs the base agent's
   ordinary trading first (`super().doTrading()`), then the land-specific
   behaviours in order: forceful collection, trust
-  accrual, and `doGovernanceReview` (executor neglect + levy + withdrawal +
+  accrual, consent-based co-ownership grants (`doLandConsentGrants`), and
+  `doGovernanceReview` (executor neglect + levy + withdrawal +
   re-legislation + executor replacement).
   *Design choice — pure call-sequencing wrapper.*
 - **`findBestEthicalCell(self, cells, greedyBestCell=None)`** (`578-586`) —
@@ -551,23 +651,70 @@ government commit `9a70cff`); for that commit's original per-method citations se
   the most overdue case, regardless of distance. Non-executors and
   executors with nothing collectible get `None` (no pursuit bias).
   *Design choice — which of possibly several outstanding debts to chase (oldest, not nearest) is invented; Sect. 126 establishes only that an executive power to reach transgressors must exist, not a prioritization rule among several.*
-- **`findEthicalValueOfCell(self, cell, pursuitTarget=None)`** (`603-614`) —
+- **`isDesperate(self)`** (`612-613`) — Returns `True` if `self` would end
+  this timestep with negative sugar or negative spice on its *current*
+  holdings alone (`sugar - findSugarMetabolism() < 0`, or the spice
+  equivalent) — i.e. the agent is about to die of starvation this very
+  timestep unless it finds more. Reused only by `findEthicalValueOfCell`
+  below; a cheap, purely-arithmetic check with no side effects.
+  *Locke, First Treatise, Sect. 42: "As justice gives every man a title to the product of his honest industry... so charity gives every man a title to so much out of another's plenty, as will keep him from extreme want, where he has no means to subsist otherwise." A man on the brink of starving has a natural claim overriding another's ordinary exclusive right — this codebase's version of that claim is behavioral (he'll go take it) rather than a title anyone else recognizes, but the citation is for the underlying claim, not the enforcement mechanism, which Locke doesn't specify. This is a First Treatise citation; unlike every other citation in this file it could not be checked against the locally available Second Treatise PDF (see CLAUDE.md) and is sourced from general familiarity with the passage's wording and context — flagged here rather than presented with the same confidence as a directly verified quote.*
+- **`findEthicalValueOfCell(self, cell, pursuitTarget=None)`** (`615-639`) —
   Computes a cell's attractiveness for the movement decision as
-  `sugar + spice`, forced to `0` when the cell is owned by another living
-  agent — and, if `self.locke["restrained"]` is set, to
-  `-(sugar + spice) - 1` (negative, richer claims avoided harder). A Locke
-  agent places no value on entering foreign land; a restrained one scores it
-  below its own worst legitimate option. An owner on their own cell is
-  unaffected either way. Then, if `findBestEthicalCell` passed a
+  `sugar + spice`, adjusted when the cell is owned by another living agent.
+  If `self.isDesperate()`, none of the adjustments below apply at all —
+  the cell scores at its full raw value, foreign or not, closed policy or
+  not, restrained or not: desperation overrides every other branch,
+  including restraint. Otherwise, if `self.locke["restrained"]` is set,
+  the adjusted value is always
+  `-(sugar + spice) - 1` regardless of anything else (negative, richer
+  claims avoided harder) — a restrained-but-not-desperate agent forswears
+  foreign land entirely, even land it could otherwise lawfully pay into.
+  Otherwise, the
+  cell's owning government (`territoryGovernmentFor`) and `self`'s own
+  membership in it decide the outcome: if `self` is **not** a member and
+  that government's `governmentLandUse` is a **toll price** (not
+  `"closed"`), the value becomes `(sugar + spice) * (1 - landUse)` — the
+  same net gain the agent would actually keep after
+  `recordLandTrespassIfOwned` charges the toll on harvest, so a
+  lawful, toll-payable cell is scored as a discounted opportunity rather
+  than a worthless one. In every other case (no government, a fellow
+  member on a co-member's own specific claim, or `"closed"` land use) the
+  value is `0`, exactly as before. An owner on their own cell is
+  unaffected either way. **Fixed finding**: before this, foreign land was
+  scored `0` unconditionally, whether the policy was `"closed"` or a
+  payable toll — the lawful toll-entry path `agent.py` already implements
+  was never actually reachable by an agent's own movement choice, since
+  the valuation never distinguished a payable toll from outright closure.
+  A 100-seed run of the current `config.json` (pure-`"locke"` population)
+  showed most seeds crashing to extinction well before timestep 500, with
+  `restrained` and outstanding debts both near zero throughout every
+  doomed run — ruling out trespass punishment or debt seizure as the
+  cause — while a matched, identical-seed comparison against the
+  `"none"` (no ethics) decision model showed Locke agents generating
+  ~40-60% as many compatible-neighbour reproduction opportunities as
+  otherwise-identical plain agents, because they were treating all
+  claimed land as absolute no-go territory instead of using the
+  toll-paying option the model already supports; several seeds that
+  recover under `"none"` reliably went extinct under `"locke"` for
+  exactly this reason. This fix measurably raises the mid-run population
+  and reproduction-opportunity count on the same seeds (see the scratch
+  tests and comparison in this change's verification), though it does not
+  fully eliminate extinction risk — the underlying `config.json`
+  demographic parameters (`agentReplacements: 0`, tight fertility
+  windows) already put even the `"none"` baseline within a
+  boom-or-bust regime, extinct in a real fraction of seeds with no Locke
+  mechanics involved at all.
+  Then, if `findBestEthicalCell` passed a
   `pursuitTarget` (only ever non-`None` for an executor with something
   collectible), subtracts `environmentLandExecutorPursuitWeight *`
   Manhattan distance from the candidate cell to the target's *current* cell
   — cells closer to the debtor score relatively higher, biasing movement
-  toward it without special-casing or overriding the exclusion/restraint
-  logic above (a foreign cell that happens to be closest to the target is
-  still `0` or negative before the pursuit term applies). The executor uses
-  the debtor's exact current position, not a sensed/inferred one.
-  *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" — exclusion is the primary effect of property. Hard exclusion in the movement score, not a tunable discount; an unrestrained Locke agent still trespasses when every reachable cell scores 0 (boxed in by claims), and non-`Locke` agents (which never run this method) trespass freely — so the trespass → debt → reparation machinery stays exercised. Sect. 12: punishment serves "reparation and restraint" — the negative score is the restraint half, driving a previously-collected-from agent to enter claimed land only when literally every reachable cell belongs to someone else. Restricted to Locke agents (only they carry the flag); implemented for completeness — in practice Locke agents rarely trespass under hard exclusion, so it seldom fires. The exclusion is flat across agents — Sect. 27 excludes everyone's common right equally, not weighted by trust or shared government. The pursuit bias is Sect. 126's "power... to give [the sentence] due execution" made into an actual cost the executor bears (worse foraging while it chases) instead of a stipulated one — the weight, the Manhattan metric, and full-information debtor tracking (no fog-of-war exists anywhere else in the model either) are design choices.*
+  toward it without special-casing or overriding the exclusion/restraint/
+  toll logic above (a foreign, closed-or-member-only cell that happens to
+  be closest to the target is still `0` or negative before the pursuit
+  term applies). The executor uses the debtor's exact current position,
+  not a sensed/inferred one.
+  *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" — exclusion is the primary effect of property, grounding the `0` case (closed policy, or a member on a co-member's own plot, where no lawful entry exists at all). Sect. 119/124 ground the toll-discount case: one who enjoys "any part of the dominions of any government" under its "standing rule" may lawfully remain and pay into it — a non-member entering under a chosen toll price, rather than a closed one, is exercising exactly that lawful path already coded in `recordLandTrespassIfOwned`; valuing it at its net (post-toll) worth is what makes that lawful path a real option for a self-interested mover, not merely something that happens to work out if the agent stumbles onto it. Sect. 12: punishment serves "reparation and restraint" — the negative score for a restrained agent is the restraint half, driving a previously-collected-from agent to enter claimed land only when literally every reachable cell belongs to someone else (this restraint deliberately overrides even a payable toll — Sect. 12's restraint is a response to violation, harsher than the ordinary toll-access terms available to an agent that's never been caught). Restricted to Locke agents (only they carry the flag); non-`Locke` agents (which never run this method) trespass freely, so the trespass → debt → reparation machinery stays exercised regardless. The exact discount formula (`* (1 - landUse)`) is a design choice, though a tightly constrained one — it is exactly the fraction `recordLandTrespassIfOwned` actually keeps after the toll, so any other formula would value the same lawful act inconsistently between the decision to move there and the accounting once there.*
 - **`doInheritance(self)`** (`682-717`) — Runs the base wealth-inheritance
   mechanic first, then splits/forfeits the deceased's land shares (Locke
   children co-own; otherwise the share reverts). Discharges the deceased's
@@ -667,6 +814,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `"environmentLandLegislatureGrievanceThreshold": 6.0`,
   `"environmentLandLegislatureSize": 1`,
   `"environmentLandLevyFractionChoices": [0.1, 0.3, 0.5, 0.7, 0.9]`,
+  `"environmentLandMaxClaimsPerAgent": 1`,
   `"environmentLandReparationRateChoices": [1.25, 1.5, 2.0, 3.0]`,
   `"environmentLandReparationStakeReference": 8`,
   `"environmentLandTrustThresholdRange": [4, 8]`, and
@@ -732,6 +880,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   experiment, not something to fold into this shared scenario config
   pre-emptively.
   *Design choice (the size); the underlying Sect. 132 taxonomy — see `voteGovernmentForm` / `findLegislature` above.*
+- **`environmentLandMaxClaimsPerAgent: 1`** (new key) — Matches the code
+  default; kept at the tightest possible value for this scenario, so
+  claim-holding maps one-to-one onto agents rather than letting a few
+  long-lived agents accumulate several scattered cells each.
+  *Design choice (the number); the underlying bound on how much one person's labour/consumption can justly appropriate is Sect. 36 — see `collectResourcesAtCell` above.*
 - **The governance tuning keys** —
   `environmentLandLevyFractionChoices` (`[0.1, 0.3, 0.5, 0.7, 0.9]`,
   matching the code default — the levy fraction is now voted rather than
@@ -913,6 +1066,12 @@ government commit `9a70cff`); for that commit's original per-method citations se
   single-point-reference degeneracy a monarchy's size-1 legislature would
   otherwise produce; Locke-only.
   *Design choice — documentation; see `voteLevyFraction` above.*
+- **`environmentLandMaxClaimsPerAgent` entry** (new) — Documents the
+  per-agent claim cap, that it gates *new* acquisition only (an agent
+  already over the limit when it's lowered isn't forced to forfeit
+  anything), and that it's checked alongside — not instead of — the
+  "enough, and as good" proviso; Locke-only.
+  *Design choice — documentation; see `collectResourcesAtCell` above.*
 - **`environmentLandUseChoices` / `environmentLandGrievanceThreshold` /
   `environmentLandGrievanceDecay` entries** (new) — Document the land-use
   menu and the withdrawal-grievance threshold/decay; all Locke-only. The
