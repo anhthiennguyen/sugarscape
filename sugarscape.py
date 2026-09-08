@@ -1913,6 +1913,7 @@ if __name__ == "__main__":
                      "environmentHeight": 50,
                      "environmentInGroupRaces": [],
                      "environmentLandDecayTimesteps": 50,
+                     "environmentLandExecutorCount": 1,
                      "environmentLandExecutorNeglectGraceTimesteps": 5,
                      "environmentLandExecutorNeglectPenalty": 0.5,
                      "environmentLandExecutorReviewThreshold": 15.0,

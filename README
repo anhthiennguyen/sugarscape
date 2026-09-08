@@ -435,6 +435,11 @@ environmentLandDecayTimesteps: int
     Note: Only relevant to the "locke" decision model.
     Default: 50
 
+environmentLandExecutorCount: int
+    Set the number of executors a Locke government elects. The vote (`voteExecutor`) picks the top N members by vision plus movement (capacity to reach a debtor), ties broken by lowest agent ID, generalizing the single-executor selection to any count. Clamped to at least 1 and at most the government's member count.
+    Note: Only relevant to the "locke" decision model.
+    Default: 1
+
 environmentLandExecutorNeglectGraceTimesteps: int
     Set the number of timesteps a ripened (already collectible) land debt owed to a Locke government member may go unenforced before it begins to count as executor neglect. The window is measured from when the debt became collectible, giving the appointed executor time to cross the map and reach the debtor.
     Note: Only relevant to the "locke" decision model.

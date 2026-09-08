@@ -691,7 +691,7 @@ class GUI:
             government = agentLocke.get("government") if agentLocke != None else None
             if government == None:
                 return self.colors["noGovernment"]
-            if agentLocke.get("governmentExecutor") is agent:
+            if agent in (agentLocke.get("governmentExecutor") or frozenset()):
                 return self.colors["executor"]
             return self.colors["governmentMember"]
         elif self.activeColorOptions["agent"] == "Government":

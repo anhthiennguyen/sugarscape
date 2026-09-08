@@ -81,6 +81,7 @@
         "environmentHeight": 50,
         "environmentInGroupRaces": [0],
         "environmentLandDecayTimesteps": 12,
+        "environmentLandExecutorCount": 2,
         "environmentLandExecutorNeglectGraceTimesteps": 5,
         "environmentLandExecutorNeglectPenalty": 0.5,
         "environmentLandExecutorReviewThreshold": 15.0,

@@ -24,8 +24,9 @@ government commit `9a70cff`); for that commit's original per-method citations se
   Sect. 138 levy is paid back out), `grievance` (`0.0`; cumulative net loss
   under `proportional`, the fuel for Sect. 240 withdrawal), `lastHarvest` (this
   timestep's gross harvest, for the levy), `lastLevyTimestep` (idempotence
-  guard for the once-per-timestep levy pass), `governmentExecutor` (the member
-  appointed to collect on the society's behalf — Sect. 126/130), and
+  guard for the once-per-timestep levy pass), `governmentExecutor` (a
+  `frozenset` of the member(s) appointed to collect on the society's
+  behalf — Sect. 126/130), and
   `executorGrievance` (`0.0`; a separate accumulator for the Sect. 156
   complaint, drives executor replacement only, never withdrawal).
   *Design choice — bookkeeping structure, no textual analog. `trustThreshold`, `restrained`, `grievance`, `executorGrievance` are all per-agent and never inherited (Sect. 116/118 for political disposition; Sect. 12 restraint and one's own grievance are personal). The government-law fields (rate, land-use, redistribution, executor) are copied from existing members on join (Sect. 97), not from a parent.*
@@ -110,29 +111,26 @@ government commit `9a70cff`); for that commit's original per-method citations se
   above its own metabolic need (sugar first, then spice), removing the debt
   once fully paid. No proximity requirement.
   *Locke, Sect. 37: "the intrinsic value of things... depends only on their usefulness to the life of man," combined with Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life." Together these ground value as commensurable across different useful goods, but it's a stretched analogy: Locke's money is valuable specifically because it is NOT one of the perishable staples, whereas sugar and spice here are the staples themselves — the "same nominal value regardless of resource" rule has no tight single-passage match.*
-- **`doForcefulDebtCollection(self)`** (`726-784`) — Runs every timestep; for
+- **`doForcefulDebtCollection(self)`** (`679-719`) — Runs every timestep; for
   every neighboring agent, for every debt that neighbor owes older than
   `environmentLandForcefulCollectionGraceTimesteps`, seizes whatever
   sugar/spice the debtor holds (capped at the debt) and pays it to the
   creditor. The gate, in order: **`self` is the creditor** (ungated self-help);
-  or **`self` is its government's `governmentExecutor` and the creditor is a
-  fellow member**; or — new — **`self` is a non-executor member, the creditor
-  is a fellow member, the government has a sitting executor, and the debt is
-  already flagged `executorRecognized`**. Anything else falls through to a
-  "leaves … to the executor / its creditor" log and does nothing; a
-  governmentless agent still collects only its own. **Recognition**: whenever
-  the executor's own pass reaches a debt it is entitled to collect (its own, if
-  it is the executor; or any fellow member's), it stamps
+  or **`self` is one of its government's `governmentExecutor` set and the
+  creditor is a fellow member**; or — new — **`self` is a non-executor
+  member, the creditor is a fellow member, the government has at least one
+  sitting executor, and the debt is already flagged `executorRecognized`**.
+  Anything else does nothing; a governmentless agent still collects only
+  its own. **Recognition**: whenever any executor's own pass reaches a debt
+  it is entitled to collect (its own, if it is the executor; or any fellow
+  member's), it stamps
   `debt["executorRecognized"] = True` — the executive's adjudication that this
   is a valid society debt to enforce — whether or not it can seize anything that
   step (the debtor may be momentarily empty). The executor only encounters
   debts of agents adjacent to it, so recognition spreads as it moves; the flag,
   once set, persists on the debt record until the debt is settled. When a
-  seizure lands on a `Locke` debtor its `restrained` flag is set (Sect. 12). If
-  the executor collects its *own* debt in a step where a fellow member's
-  enforceable one goes unreached, a `Sect. 156` line is logged; an assisting
-  member's seizure log carries a `Sect. 130` marker.
-  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. Sect. 156 grounds the neglect line — the executor's power is "a fiduciary trust... for the safety of the people", and self-collection while a fellow member's debt goes unreached is that trust visibly unfulfilled (not Sect. 222 — no property is taken). An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes).*
+  seizure lands on a `Locke` debtor its `restrained` flag is set (Sect. 12).
+  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes).*
 - **`doTrustAccrual(self)`** (`793-806`) — Runs every timestep for every
   cell the agent owns; every neighbor of that cell who is alive, not a
   co-owner, and didn't trespass on it *this* timestep earns one trust point
@@ -141,8 +139,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   reusing the same `cellPendingViolations`/`findNeighborAgents` primitives
   rather than re-scanning adjacency separately.
   *Design choice — no textual analog for a quantified trust-building period; Locke never describes trust or reputation being built up numerically before political society forms.*
-- **`increaseTrust(self, candidate, cell)`** (`807-815`) — Increments
-  `self.locke["trust"][candidate.ID]` by 1, logs it, and — only if
+- **`increaseTrust(self, candidate, cell)`** (`735-739`) — Increments
+  `self.locke["trust"][candidate.ID]` by 1, and — only if
   `candidate` is itself a `Locke` instance — checks whether this increment
   just completed mutual threshold-crossing (`attemptGovernmentFormation`).
   The `isinstance(candidate, Locke)` check here is also what satisfies
@@ -172,7 +170,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   government adopts the median of the founders' preferred rates (lower of the
   two middle values for an even count). Stored as `governmentRate`.
   *Locke, Sect. 12 gives only a floor ("an ill bargain"), not a number, so the rate is set by collective decision. Sect. 95-96: one equal vote each, the body moving "whither the greater force carries it, which is the consent of the majority" — hence the median. Sect. 138 grounds keying the preference to holdings. The stake-reference constant and the choice menu are design choices.*
-- **`voteLandUse(self, members)`** (`814-823`) — The Sect. 124 standard binding
+- **`voteLandUse(self, members)`** (`779-788`) — The Sect. 124 standard binding
   non-members in the territory: a single vote over `environmentLandUseChoices`
   (strictest to most lenient, `"closed"` first), structurally identical to
   `voteReparationRate` — each member's preferred option is one entry from the
@@ -198,14 +196,18 @@ government commit `9a70cff`); for that commit's original per-method citations se
   (`addToGovernment`, `doInheritance`) or grievance forces a review — the one
   law that reconvenes the legislative (Sect. 153).
   *Locke, Sect. 138/139: "the supreme power cannot take from any man any part of his property without his own consent" — the levy is exactly that, a taking the aggrieved minority did not consent to. `"equal"` returns each member its own levy (the power held, not abused); `"proportional"` moves value from the land-poor to the land-rich — Sect. 199, power "to his own private separate advantage." So this is Lockean not as legitimate legislation (Sect. 140 taxation funds operations; this funds nothing) but as the wrong of Sect. 222 ("they endeavour to take away, and destroy the property of the people"), which forfeits trust and licenses withdrawal (Sect. 240). The mean-relative vote and the whole levy amount are design choices.*
-- **`voteExecutor(self, members)`** (`936-946`) — The fourth founding law
+- **`voteExecutor(self, members)`** (`880-884`) — The fourth founding law
   (Sect. 126). Preference does **not** track landholding — §126's defect is
-  inability to *reach* the transgressor, so the pick is the member with the
-  greatest reach = `findVision() + findMovement()`, ties broken by lowest ID.
-  Because reach is an objective shared fact the ballot is degenerate (every
-  member names the same agent) and it reduces to an argmax — kept in vote form
-  for parity with the other three, noted here.
-  *Locke, Sect. 126 grounds the appointment (the state of nature "wants power... to give [the sentence] due execution"). Sect. 152 grounds its being an office, replaceable "at pleasure", not a right — hence the deterministic tie-break rather than a natural entitlement. The vision+movement metric is a design choice standing in for "capacity to execute a judgment on a distant party."*
+  inability to *reach* the transgressor, so the pick is the top
+  `environmentLandExecutorCount` members (clamped to at least 1, at most
+  `len(members)`) ranked by reach = `findVision() + findMovement()`, ties
+  broken by lowest ID, returned as a `frozenset`. Because reach is an
+  objective shared fact the ballot is degenerate (every member ranks the
+  same members in the same order) and it reduces to an arg-top-N — kept in
+  vote form for parity with the other three, noted here. At the default
+  count of `1` this is exactly the single-executor argmax the mechanic
+  originally shipped with.
+  *Locke, Sect. 126 grounds the appointment (the state of nature "wants power... to give [the sentence] due execution"). Sect. 152 grounds its being an office, replaceable "at pleasure", not a right — hence the deterministic tie-break rather than a natural entitlement. The vision+movement metric is a design choice standing in for "capacity to execute a judgment on a distant party." Sect. 126 establishes that an executive power must exist, not how many people hold it — the count itself is a design choice, hence configurable.*
 - **`addToGovernment(self, government, newMember)`** (`947-971`) — Adds
   `newMember` to the shared `set()`, points their `locke["government"]` at it,
   copies the standing `governmentRate` / `governmentLandUse` /
@@ -221,13 +223,16 @@ government commit `9a70cff`); for that commit's original per-method citations se
   persists and grievance climbs to withdrawal (Sect. 222–243: dissolution, not
   reform, is the remedy for a legislature turned to faction advantage).
   *Sect. 153: "it is not necessary... that the legislative should be always in being" — it meets on occasion, and a roster change or a failing law is an occasion.*
-- **`reviewExecutor(self, government)`** (`989-1006`) — Re-runs `voteExecutor`;
-  if the appointment changed, writes it to every member, logs `(Sect. 152)`,
-  returns `True`. Returns `False` when the sitting executor is still the
-  highest-reach member — the maladministration cannot be fixed by replacement,
-  and (per design) the government does **not** dissolve over it; the complaint
-  stands. That inertness is itself the Sect. 126 finding: a magistracy with no
-  power to reach the debtor is the very defect it was appointed to cure.
+- **`reviewExecutor(self, government)`** (`886-895`) — Re-runs `voteExecutor`;
+  compares the new `frozenset` to the old **by value** (`==`, not `is` —
+  `voteExecutor` builds a fresh set every call, so identity would always
+  read as changed even when the elected members are unchanged); if the set
+  changed, writes it to every member, returns `True`. Returns `False` when
+  the sitting executor(s) are still the highest-reach members — the
+  maladministration cannot be fixed by replacement, and (per design) the
+  government does **not** dissolve over it; the complaint stands. That
+  inertness is itself the Sect. 126 finding: a magistracy with no power to
+  reach the debtor is the very defect it was appointed to cure.
   *Locke, Sect. 152: the executive is "accountable to [the legislative], and may at pleasure be changed and displaced"; Sect. 153: the legislative resumes power "to punish for any maladministration against the laws."*
 - **`territoryGovernmentFor(self, cell)`** (`965-975`) — Returns the `set()`
   government of the first living owner of `cell` that belongs to one, else
@@ -366,6 +371,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   *Design choice — Python object-instantiation plumbing.*
 - **Default configuration dict** (`~1914-1928`) — Adds, as hardcoded defaults:
   `"environmentLandDecayTimesteps": 50`,
+  `"environmentLandExecutorCount": 1`,
   `"environmentLandExecutorNeglectGraceTimesteps": 5`,
   `"environmentLandExecutorNeglectPenalty": 0.5`,
   `"environmentLandExecutorReviewThreshold": 15.0`,
@@ -414,6 +420,12 @@ government commit `9a70cff`); for that commit's original per-method citations se
 - **`environmentLandForcefulCollectionGraceTimesteps: 1`** (line `84`, new
   key) — Matches the code default of `1`.
   *Design choice — Locke specifies no time period at all before force becomes legitimate; see Sect. 12/19 under `doForcefulDebtCollection` above.*
+- **`environmentLandExecutorCount: 2`** (new key) — Overrides the code
+  default of `1` up to `2`, so this scenario's governments elect two
+  executors instead of one; with `environmentLandTrustThresholdRange: [1, 1]`
+  already growing governments past 2 members quickly here, this exercises
+  "top-2 of a larger roster" rather than just "both founders."
+  *Design choice (the count); the appointment itself is Sect. 126 — see `voteExecutor` above.*
 - **`environmentLandReparationRateChoices: [1.25, 1.5, 2.0, 3.0]`** /
   **`environmentLandReparationStakeReference: 8`** / **`environmentLandUseChoices:
   ["closed", 0.5, 0.35, 0.2]`** (new keys) — Match the code defaults; the
@@ -503,9 +515,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   and colors it via `findGovernmentColor`; any agent without one — every
   non-Locke agent included — gets the neutral `"noGovernment"` gray.
   The **`"Executor"` agent branch** (Phase 4) is the same duck-typed lookup,
-  three flat tones: `"executor"` gold when `locke["governmentExecutor"] is
-  agent`, `"governmentMember"` teal for any other member, `"noGovernment"`
-  gray otherwise. The **`"Territory"` environment branch** (Phase 4) is the
+  three flat tones: `"executor"` gold when `agent` is a member of
+  `locke["governmentExecutor"]` (a `frozenset`, possibly holding more than
+  one agent per `environmentLandExecutorCount`), `"governmentMember"` teal
+  for any other member, `"noGovernment"` gray otherwise. The
+  **`"Territory"` environment branch** (Phase 4) is the
   Property branch with one extra step: for a claimed cell it walks
   `cell.owners`, and if an owner has a government returns that government's
   `findGovernmentColor` (so the same government's land and — under the
@@ -529,6 +543,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   Documents the grace-period config key, its Locke-only relevance, and its
   default of `1`.
   *Design choice — documentation; see Sect. 12/19 under `doForcefulDebtCollection` above.*
+- **`environmentLandExecutorCount` entry** (new) — Documents the executor
+  count, its clamping to `[1, len(members)]`, and that it generalizes the
+  same vision+movement/lowest-ID selection the single-executor case
+  already used; Locke-only.
+  *Design choice — documentation; see `voteExecutor` above.*
 - **`environmentLandExecutorNeglectGraceTimesteps` /
   `environmentLandExecutorNeglectPenalty` / `environmentLandExecutorReviewThreshold`
   entries** (new) — Document the executor neglect window (measured from when a

@@ -16,6 +16,7 @@
     "agentSugarMetabolism": [1, 4],
     "agentTradeFactor": [1, 1],
     "environmentLandDecayTimesteps": 10,
+    "environmentLandExecutorCount": 2,
     "environmentLandExecutorNeglectGraceTimesteps": 5,
     "environmentLandExecutorNeglectPenalty": 0.5,
     "environmentLandExecutorReviewThreshold": 15.0,
