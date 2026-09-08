@@ -53,19 +53,30 @@ class; a government is a bare `set()` of member agents).
 
 ### Recurring patterns
 
-- **Five founding votes** (`voteReparationRate`, `voteLandUse`,
-  `voteRedistribution`, `voteExecutor`, `votePayFraction`), voted in
-  `attemptGovernmentFormation`, stored per member (`governmentRate` /
-  `governmentLandUse` / `governmentRedistribution` / `governmentExecutor` /
+- **Six founding votes** (`voteGovernmentForm`, `voteReparationRate`,
+  `voteLandUse`, `voteRedistribution`, `voteExecutor`, `votePayFraction`),
+  voted in `attemptGovernmentFormation`, stored per member
+  (`governmentForm` / `governmentRate` / `governmentLandUse` /
+  `governmentRedistribution` / `governmentExecutor` /
   `governmentExecutorPay`), copied onto joiners in `addToGovernment` (§97).
-  `voteRedistribution`, `voteExecutor`, and `votePayFraction` are re-voted on
-  any roster change (`reviewRedistribution` / `reviewExecutor` /
-  `reviewExecutorPay` — the last always runs alongside `reviewExecutor`,
-  since its preference depends on executor membership); the other two are
-  §153-frozen.
+  `voteGovernmentForm` runs first and decides `findLegislature` — who
+  actually casts the other five votes (full membership under
+  `"democracy"`, the top-`environmentLandLegislatureSize` landholders
+  under `"oligarchy"`/`"monarchy"`; both are the same mechanism at
+  different K). `voteRedistribution`, `voteExecutor`, and `votePayFraction`
+  are re-voted on any roster change (`reviewRedistribution` /
+  `reviewExecutor` / `reviewExecutorPay`, always preceded by
+  `reviewLegislature` since all three now read `governmentLegislature`
+  rather than full membership — the last of the three always runs
+  alongside `reviewExecutor`, since its preference depends on executor
+  membership); `voteReparationRate`, `voteLandUse`, and now
+  `voteGovernmentForm` itself are §153/§134-frozen (§149 — dissolution — is
+  the only way a government's form ever changes; see `doGovernanceReview`).
 - **Two grievance channels**: `grievance` (withdrawal §240 + dissolution
-  §211) — fed by the redistributive levy (§138/199), by executor partiality
-  (§199, in `doForcefulDebtCollection`), and by executor pay above
+  §211) — fed by the redistributive levy (§138/199, now measured against
+  the *whole* government even when a small legislature casts the vote —
+  see `voteRedistribution`), by executor partiality (§199, in
+  `doForcefulDebtCollection`), and by executor pay above
   `environmentLandExecutorMaintenanceFraction` (§138, in `runLevyPass`);
   `executorGrievance` (unenforced debt, §156) → executor replacement only
   (§152).

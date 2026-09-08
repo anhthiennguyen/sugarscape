@@ -560,7 +560,8 @@ class Locke(agent.Agent):
                        "governmentLandUse": None, "governmentRedistribution": None,
                        "grievance": 0.0, "lastHarvest": 0.0, "lastLevyTimestep": -1,
                        "governmentExecutor": None, "executorGrievance": 0.0,
-                       "governmentExecutorPay": None}
+                       "governmentExecutorPay": None, "governmentForm": None,
+                       "governmentLegislature": None}
 
     def updateValues(self):
         super().updateValues()
@@ -713,6 +714,7 @@ class Locke(agent.Agent):
             self.dissolveGovernmentIfUnviable(government)
             if len(government) >= 2:
                 survivor = next(iter(government))
+                survivor.reviewLegislature(government)
                 survivor.reviewRedistribution(government)
                 survivor.reviewExecutor(government)
                 survivor.reviewExecutorPay(government)
@@ -901,13 +903,23 @@ class Locke(agent.Agent):
             return
         newGovernment = {self, other}
         founders = [self, other]
-        rate = self.voteReparationRate(founders)
-        landUse = self.voteLandUse(founders)
-        redistribution = self.voteRedistribution(founders)
-        executor = self.voteExecutor(founders)
-        pay = self.votePayFraction(founders, executor)
+        formVote = self.voteGovernmentForm(founders)
+        if formVote == "restricted":
+            configuration = self.cell.environment.sugarscape.configuration
+            legislatureSize = min(max(1, configuration["environmentLandLegislatureSize"]), len(founders))
+            form = "monarchy" if legislatureSize == 1 else "oligarchy"
+        else:
+            form = "democracy"
+        legislature = self.findLegislature(founders, form)
+        rate = self.voteReparationRate(legislature)
+        landUse = self.voteLandUse(legislature)
+        redistribution = self.voteRedistribution(legislature, founders)
+        executor = self.voteExecutor(legislature)
+        pay = self.votePayFraction(legislature, executor)
         for founder in founders:
             founder.locke["government"] = newGovernment
+            founder.locke["governmentForm"] = form
+            founder.locke["governmentLegislature"] = legislature
             founder.locke["governmentRate"] = rate
             founder.locke["governmentLandUse"] = landUse
             founder.locke["governmentRedistribution"] = redistribution
@@ -917,9 +929,43 @@ class Locke(agent.Agent):
             founder.locke["executorGrievance"] = 0.0
         if "all" in self.debug or "agent" in self.debug:
             executorIDs = sorted(member.ID for member in executor)
-            print(f"Agent {self.ID} and Agent {other.ID} found a new government "
-                  f"(reparation rate {rate}, land use {landUse}, redistribution {redistribution}, "
-                  f"executor(s) {executorIDs}, executor pay {pay}) after mutual trust crosses both thresholds")
+            legislatureIDs = sorted(member.ID for member in legislature)
+            print(f"Agent {self.ID} and Agent {other.ID} found a new {form} government "
+                  f"(legislature {legislatureIDs}, reparation rate {rate}, land use {landUse}, "
+                  f"redistribution {redistribution}, executor(s) {executorIDs}, executor pay {pay}) "
+                  f"after mutual trust crosses both thresholds")
+
+    def voteGovernmentForm(self, founders):
+        configuration = self.cell.environment.sugarscape.configuration
+        reference = configuration["environmentLandReparationStakeReference"]
+        preferred = ["restricted" if reference > 0 and len(f.locke["claims"]) >= reference
+                     else "democracy" for f in founders]
+        order = ["democracy", "restricted"]
+        preferred.sort(key=order.index)
+        return preferred[(len(preferred) - 1) // 2]
+
+    def findLegislature(self, members, form):
+        if form == "democracy":
+            return frozenset(members)
+        configuration = self.cell.environment.sugarscape.configuration
+        size = min(max(1, configuration["environmentLandLegislatureSize"]), len(members))
+        ranked = sorted(members, key=lambda member: (len(member.locke["claims"]), -member.ID), reverse=True)
+        return frozenset(ranked[:size])
+
+    def reviewLegislature(self, government):
+        members = list(government)
+        if len(members) < 2:
+            return False
+        form = members[0].locke["governmentForm"]
+        newLegislature = self.findLegislature(members, form)
+        if newLegislature == members[0].locke["governmentLegislature"]:
+            return False
+        for member in members:
+            member.locke["governmentLegislature"] = newLegislature
+        if "all" in self.debug or "agent" in self.debug:
+            legislatureIDs = sorted(member.ID for member in newLegislature)
+            print(f"Agent {self.ID}'s government revises its legislature to {legislatureIDs}")
+        return True
 
     def addToGovernment(self, government, newMember):
         government.add(newMember)
@@ -930,11 +976,14 @@ class Locke(agent.Agent):
         newMember.locke["governmentRedistribution"] = existingMember.locke["governmentRedistribution"]
         newMember.locke["governmentExecutor"] = existingMember.locke["governmentExecutor"]
         newMember.locke["governmentExecutorPay"] = existingMember.locke["governmentExecutorPay"]
+        newMember.locke["governmentForm"] = existingMember.locke["governmentForm"]
+        newMember.locke["governmentLegislature"] = existingMember.locke["governmentLegislature"]
         newMember.locke["grievance"] = 0.0
         newMember.locke["executorGrievance"] = 0.0
         if "all" in self.debug or "agent" in self.debug:
             memberIDs = sorted(member.ID for member in government)
             print(f"Agent {newMember.ID} joins an existing government (no re-founding, members: {memberIDs})")
+        newMember.reviewLegislature(government)
         newMember.reviewRedistribution(government)
         newMember.reviewExecutor(government)
         newMember.reviewExecutorPay(government)
@@ -967,7 +1016,8 @@ class Locke(agent.Agent):
         members = list(government)
         if len(members) < 2:
             return False
-        newExecutor = self.voteExecutor(members)
+        legislature = members[0].locke["governmentLegislature"]
+        newExecutor = self.voteExecutor(legislature)
         if newExecutor == members[0].locke["governmentExecutor"]:
             return False
         for member in members:
@@ -988,8 +1038,9 @@ class Locke(agent.Agent):
         members = list(government)
         if len(members) < 2:
             return False
+        legislature = members[0].locke["governmentLegislature"]
         executor = members[0].locke["governmentExecutor"] or frozenset()
-        newPay = self.votePayFraction(members, executor)
+        newPay = self.votePayFraction(legislature, executor)
         if newPay == members[0].locke["governmentExecutorPay"]:
             return False
         for member in members:
@@ -998,9 +1049,9 @@ class Locke(agent.Agent):
             print(f"Agent {self.ID}'s government revises executor pay to {newPay} (Sect. 140/138)")
         return True
 
-    def voteRedistribution(self, members):
-        meanClaims = sum(len(member.locke["claims"]) for member in members) / len(members)
-        votes = ["proportional" if len(member.locke["claims"]) > meanClaims else "equal" for member in members]
+    def voteRedistribution(self, votingMembers, allMembers):
+        meanClaims = sum(len(member.locke["claims"]) for member in allMembers) / len(allMembers)
+        votes = ["proportional" if len(member.locke["claims"]) > meanClaims else "equal" for member in votingMembers]
         return "proportional" if votes.count("proportional") > votes.count("equal") else "equal"
 
     def runLevyPass(self, government):
@@ -1051,7 +1102,8 @@ class Locke(agent.Agent):
         members = list(government)
         if len(members) < 2:
             return False
-        newRule = self.voteRedistribution(members)
+        legislature = members[0].locke["governmentLegislature"]
+        newRule = self.voteRedistribution(legislature, members)
         if newRule == members[0].locke["governmentRedistribution"]:
             return False
         for member in members:
@@ -1087,14 +1139,18 @@ class Locke(agent.Agent):
             self.locke["governmentRedistribution"] = None
             self.locke["governmentExecutor"] = None
             self.locke["governmentExecutorPay"] = None
+            self.locke["governmentForm"] = None
+            self.locke["governmentLegislature"] = None
             self.locke["grievance"] = 0.0
             self.locke["executorGrievance"] = 0.0
             self.dissolveGovernmentIfUnviable(government)
             if len(government) >= 2:
                 survivor = next(iter(government))
+                survivor.reviewLegislature(government)
                 survivor.reviewExecutor(government)
                 survivor.reviewExecutorPay(government)
             return
+        self.reviewLegislature(government)
         if sum(member.locke["grievance"] for member in government) > configuration["environmentLandGovernmentReviewThreshold"]:
             if self.reviewRedistribution(government):
                 decay = configuration["environmentLandGrievanceDecay"]
@@ -1116,6 +1172,8 @@ class Locke(agent.Agent):
             survivor.locke["governmentRedistribution"] = None
             survivor.locke["governmentExecutor"] = None
             survivor.locke["governmentExecutorPay"] = None
+            survivor.locke["governmentForm"] = None
+            survivor.locke["governmentLegislature"] = None
             survivor.locke["grievance"] = 0.0
             survivor.locke["executorGrievance"] = 0.0
             if "all" in survivor.debug or "agent" in survivor.debug:

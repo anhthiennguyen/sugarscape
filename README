@@ -495,6 +495,11 @@ environmentLandGrievanceThreshold: float
     Note: Only relevant to the "locke" decision model.
     Default: 6.0
 
+environmentLandLegislatureSize: int
+    Set the size of the ruling body under a Locke government whose founding vote (governmentForm) came out "restricted" rather than "democracy": 1 behaves as a monarchy (a single legislator), greater than 1 as an oligarchy (the top-N landholders). Under "democracy" this key has no effect - the legislature is always the full membership. The legislature is recomputed by land stake whenever the government's roster changes, even though governmentForm itself, once decided at founding, is never re-voted.
+    Note: Only relevant to the "locke" decision model.
+    Default: 1
+
 environmentLandLevyFraction: float
     Set the per-timestep levy each Locke government takes from its members as a fraction of the members' mean gross harvest. The levy is redistributed among members the same timestep - equally (each member refunded its own levy, net zero) or in proportion to claimed land (a transfer from the land-poor to the land-rich), per the government's voted redistribution rule.
     Note: Only relevant to the "locke" decision model.

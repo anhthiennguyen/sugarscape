@@ -1925,6 +1925,7 @@ if __name__ == "__main__":
                      "environmentLandGovernmentReviewThreshold": 10.0,
                      "environmentLandGrievanceDecay": 0.5,
                      "environmentLandGrievanceThreshold": 6.0,
+                     "environmentLandLegislatureSize": 1,
                      "environmentLandLevyFraction": 0.3,
                      "environmentLandReparationRateChoices": [1.25, 1.5, 2.0, 3.0],
                      "environmentLandReparationStakeReference": 8,
