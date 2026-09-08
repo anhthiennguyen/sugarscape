@@ -470,20 +470,10 @@ environmentLandExecutorPursuitWeight: float
     Note: Only relevant to the "locke" decision model.
     Default: 0.5
 
-environmentLandExecutorReviewThreshold: float
-    Set the summed executor grievance across a Locke government's members at which the government reconvenes and re-votes its executor. The vote picks the member with the greatest vision plus movement (capacity to reach a debtor), ties broken by lowest agent ID; if that is still the sitting executor the complaint stands and the government does not dissolve over it.
-    Note: Only relevant to the "locke" decision model.
-    Default: 15.0
-
 environmentLandForcefulCollectionGraceTimesteps: int
     Set the number of timesteps a land debt must age before a Locke agent may forcefully collect it from the debtor.
     Note: Only relevant to the "locke" decision model.
     Default: 1
-
-environmentLandGovernmentReviewThreshold: float
-    Set the summed member grievance at which a Locke government reconvenes its legislative and re-votes its redistribution rule. The re-vote changes the rule only if the members' land holdings have shifted the land-rich/land-poor balance since it was last set; on a change, every member's grievance is multiplied by environmentLandGrievanceDecay.
-    Note: Only relevant to the "locke" decision model.
-    Default: 10.0
 
 environmentLandGrievanceDecay: float
     Set the multiplier (0 to 1) applied to every member's grievance when a government re-legislates its redistribution rule in response to grievance.
@@ -495,23 +485,38 @@ environmentLandGrievanceThreshold: float
     Note: Only relevant to the "locke" decision model.
     Default: 6.0
 
+environmentLandLegislativeReviewInterval: int
+    Set the number of timesteps between a Locke government's mandatory reconvenings, at which it re-votes its legislature composition, redistribution rule, executor, executor pay, and levy fraction all together. A value of 1 reconvenes every timestep; a departure (death or consent withdrawal) still triggers an immediate reconvening regardless of this interval, but an ordinary join no longer does. A crossed environmentLandLegislatureGrievanceThreshold also forces an immediate reconvening ahead of schedule.
+    Note: Only relevant to the "locke" decision model.
+    Default: 10
+
+environmentLandLegislatureGrievancePenalty: float
+    Set the legislatureGrievance a Locke agent accrues per timestep it is taxed but excluded from the redistribution payout - i.e. a subject under an oligarchy or monarchy, never a member of a "democracy" (where nobody is excluded). Distinct from grievance (withdrawal) and executorGrievance (executor replacement): this channel only forces an early full reconvening (see environmentLandLegislatureGrievanceThreshold), and resets whenever one happens for any reason.
+    Note: Only relevant to the "locke" decision model.
+    Default: 0.5
+
+environmentLandLegislatureGrievanceThreshold: float
+    Set the summed legislatureGrievance across a Locke government's members at which it reconvenes immediately, ahead of environmentLandLegislativeReviewInterval's schedule - the excluded subjects' collective frustration forces the legislature to revisit itself rather than waiting out the normal interval.
+    Note: Only relevant to the "locke" decision model.
+    Default: 6.0
+
 environmentLandLegislatureSize: int
-    Set the size of the ruling body under a Locke government whose founding vote (governmentForm) came out "restricted" rather than "democracy": 1 behaves as a monarchy (a single legislator), greater than 1 as an oligarchy (the top-N landholders). Under "democracy" this key has no effect - the legislature is always the full membership. The legislature is recomputed by land stake whenever the government's roster changes, even though governmentForm itself, once decided at founding, is never re-voted.
+    Set the size of the ruling body under a Locke government whose founding vote (governmentForm) came out "restricted" rather than "democracy": 1 behaves as a monarchy (a single legislator), greater than 1 as an oligarchy (the top-N landholders). Under "democracy" this key has no effect - the legislature is always the full membership. Set to the string "all" to force every government to democracy regardless of the founding vote outcome - a total kill-switch for oligarchy/monarchy. The legislature is otherwise recomputed by land stake whenever the government's roster changes, even though governmentForm itself, once decided at founding, is never re-voted.
     Note: Only relevant to the "locke" decision model.
     Default: 1
 
-environmentLandLevyFraction: float
-    Set the per-timestep levy each Locke government takes from its members as a fraction of the members' mean gross harvest. The levy is redistributed among members the same timestep - equally (each member refunded its own levy, net zero) or in proportion to claimed land (a transfer from the land-poor to the land-rich), per the government's voted redistribution rule.
+environmentLandLevyFractionChoices: [float, ...]
+    Set the menu of per-timestep levy fractions a Locke government's legislature votes over (a fraction of the members' mean gross harvest). Voted the same way as environmentLandReparationRateChoices - see that entry - except the reference population for the quantile brackets is the whole government, not just the legislature (so a size-1 monarchy's legislature is still judged against a real distribution). The levy is redistributed the same timestep - to every member if "democracy" (equally, each refunded its own levy net zero, or in proportion to claimed land), or to the legislature only otherwise (subjects are still taxed but receive nothing back), per the government's voted redistribution rule.
     Note: Only relevant to the "locke" decision model.
-    Default: 0.3
+    Default: [0.1, 0.3, 0.5, 0.7, 0.9]
 
 environmentLandReparationRateChoices: [float, ...]
-    Set the menu of candidate reparation multipliers (each greater than 1.0) applied to a land trespass debt so that repayment costs the trespasser more than the amount taken. When two Locke agents found a government they hold a one-vote-each majority vote over this menu and the government adopts the median choice for the life of that government; later joiners are bound to it without a re-vote. A land owner not in a government sizes debts at the smallest choice.
+    Set the menu of candidate reparation multipliers (each greater than 1.0) applied to a land trespass debt so that repayment costs the trespasser more than the amount taken. When two Locke agents found a government, each founder's own claimed-cell count is ranked by quantile against the founding pair's own distribution to pick one menu entry, and the government adopts the median of the two choices for the life of that government (favoring the milder choice on a tie); later joiners are bound to it without a re-vote. A land owner not in a government sizes debts at the smallest choice.
     Note: Only relevant to the "locke" decision model.
     Default: [1.25, 1.5, 2.0, 3.0]
 
 environmentLandReparationStakeReference: int
-    Set the claimed-cell count at which a Locke agent votes for the harshest reparation rate on the menu; an agent holding fewer claimed cells votes proportionally lower, an agent holding this many or more votes for the maximum. Fixed reference so a vote is an absolute function of an agent's own holdings rather than a comparison to its co-founder.
+    Set the claimed-cell count at which a Locke agent's own stake is treated as fully "landed" for votes that compare against a fixed absolute reference rather than a quantile ranking: the founding vote on governmentForm (a founder at or above this reference prefers a restricted form) and voteLandUse's toll-price preference. voteReparationRate no longer uses this reference - it ranks founders against each other by quantile instead (see environmentLandReparationRateChoices).
     Note: Only relevant to the "locke" decision model.
     Default: 8
 

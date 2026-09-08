@@ -34,12 +34,20 @@ government commit `9a70cff`); for that commit's original per-method citations se
   Sect. 140 maintenance up to a point, Sect. 138 beyond it),
   `governmentForm` (`"democracy"`/`"oligarchy"`/`"monarchy"` — Sect. 132's
   taxonomy of who holds legislative power, decided once at founding and
-  never re-voted), and `governmentLegislature` (a `frozenset` of the
+  never re-voted), `governmentLegislature` (a `frozenset` of the
   members currently holding that power — the full membership under
   democracy, the top-`environmentLandLegislatureSize` landholders
-  otherwise; recomputed on roster change even though `governmentForm`
-  itself doesn't change).
-  *Design choice — bookkeeping structure, no textual analog. `trustThreshold`, `restrained`, `grievance`, `executorGrievance` are all per-agent and never inherited (Sect. 116/118 for political disposition; Sect. 12 restraint and one's own grievance are personal). The government-law fields (rate, land-use, redistribution, executor, executor pay, form, legislature) are copied from existing members on join (Sect. 97), not from a parent.*
+  otherwise, or the full membership regardless of form when that config
+  is the string `"all"`; recomputed on roster change even though
+  `governmentForm` itself doesn't change), `governmentLevyFraction` (the
+  levy rate the legislature voted, one entry from
+  `environmentLandLevyFractionChoices`), `lastLegislativeReviewTimestep`
+  (idempotence marker for the scheduled reconvening, analogous to
+  `lastLevyTimestep`), and `legislatureGrievance` (`0.0`; accrues only on
+  a payout-excluded subject under a restricted form, forces an early
+  reconvening — a third channel, distinct from both `grievance` and
+  `executorGrievance`).
+  *Design choice — bookkeeping structure, no textual analog. `trustThreshold`, `restrained`, `grievance`, `executorGrievance`, `legislatureGrievance` are all per-agent and never inherited (Sect. 116/118 for political disposition; Sect. 12 restraint and one's own grievance are personal). The government-law fields (rate, land-use, redistribution, executor, executor pay, form, legislature, levy fraction) are copied from existing members on join (Sect. 97), not from a parent.*
 - **`cellOwners(self, cell)`** (`557-560`) — Lazily creates and returns
   `cell.owners` (a `{agent: share}` dict) the first time it's touched. The
   central accessor for reading ownership anywhere in the class.
@@ -179,20 +187,25 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `other` is in a government, `self` joins it (`addToGovernment`) on its own
   consent alone. Otherwise, only if `other`'s trust toward `self` has also
   crossed `other`'s threshold, founds a new government — a bare `set()` — and
-  votes **six** laws over the founders, in order: `voteGovernmentForm`
+  votes **seven** laws over the founders, in order: `voteGovernmentForm`
   (democracy or restricted — resolved to `"monarchy"`/`"oligarchy"` by
-  `environmentLandLegislatureSize`), then `findLegislature` picks who
+  `environmentLandLegislatureSize`, or forced to `"democracy"` outright
+  when that config is `"all"`), then `findLegislature` picks who
   actually gets a say in the rest; only then `voteReparationRate` (the
   reparation multiplier), `voteLandUse` (closed, or a per-harvest toll
   price), `voteRedistribution` (equal/proportional, judged against the
   *whole* founding pair regardless of who's voting), `voteExecutor` (who
   collects on the society's behalf), `votePayFraction` (what the
-  executor(s) are paid from the levy) are all cast by `legislature`, not
+  executor(s) are paid from the levy), and `voteLevyFraction` (the levy
+  rate itself, judged against the whole founding pair the same way
+  `voteRedistribution` is) are all cast by `legislature`, not
   necessarily both founders. Every founder still gets every resulting
   value written to their `locke` dict regardless of whether they were in
   the legislature that decided it — non-legislature members are bound
-  subjects, not voters. Zeros both founders' `grievance` and
-  `executorGrievance`.
+  subjects, not voters. Sets `lastLegislativeReviewTimestep` to the
+  founding timestep so the first scheduled reconvening doesn't fire
+  immediately. Zeros both founders' `grievance`, `executorGrievance`,
+  and (implicitly, via `__init__`'s default) `legislatureGrievance`.
   *Locke, Sect. 95-99 grounds forming political society by mutual consent — "when any number of men have so consented to make one community or government, they are thereby presently incorporated" — and is why a government is a bare `set()`, not a class: nothing more than its members' collected consent. Sect. 99 grounds the bilateral requirement for **founding** (each founder consents); Sect. 89 grounds **joining** an existing body on the joiner's consent alone ("men being... by nature all free, equal, and independent, no one can be... subjected to the political power of another, without his own consent"). The one-government-at-a-time rule is a design choice — Sect. 121 is about a tacit consenter's freedom to leave versus an express consenter's binding, not about exclusivity. Binding non-legislature founders to laws they didn't vote on is the same Sect. 97 logic that already binds ordinary joiners.*
 - **`voteGovernmentForm(self, founders)`** (`938-945`) — The Sect. 132
   founding law: a binary vote (`"democracy"` or `"restricted"`) over the
@@ -235,13 +248,36 @@ government commit `9a70cff`); for that commit's original per-method citations se
   re-examined here or anywhere else — only *who* currently holds the
   power the form grants can change.
   *Design choice — pure call-sequencing and selection-recomputation plumbing; the substantive content (who holds power, and that it can shift as circumstances change) is grounded in `findLegislature` and `voteGovernmentForm` above.*
-- **`voteReparationRate(self, founders)`** (`892-906`) — Each founder's
-  preferred rate is one entry from `sorted(environmentLandReparationRateChoices)`,
-  picked by `round(min(1.0, claims / environmentLandReparationStakeReference) *
-  (len(choices) - 1))` — its claimed-cell count against a fixed reference. The
-  government adopts the median of the founders' preferred rates (lower of the
-  two middle values for an even count). Stored as `governmentRate`.
-  *Locke, Sect. 12 gives only a floor ("an ill bargain"), not a number, so the rate is set by collective decision. Sect. 95-96: one equal vote each, the body moving "whither the greater force carries it, which is the consent of the majority" — hence the median. Sect. 138 grounds keying the preference to holdings. The stake-reference constant and the choice menu are design choices.*
+- **`findQuantileChoice(self, member, choices, referenceGroup)` /
+  `voteByQuantileBracket(self, voters, choices, referenceGroup)`**
+  (`857-873`) — Shared mechanism now behind both `voteReparationRate` and
+  `voteLevyFraction`. Sorts `referenceGroup`'s claims and computes, for
+  each of the `len(choices)-1` boundaries, a breakpoint at the
+  corresponding fractional rank (`k/len(choices)` of the way through the
+  sorted reference claims, linearly interpolated between the two nearest
+  values when that position doesn't land exactly on one — the same
+  technique `numpy.percentile`'s default interpolation uses, not naive
+  index rounding). Each `voter`'s own claims are looked up against those
+  breakpoints for their one preferred choice; the government adopts the
+  median of all voters' preferred choices (lower-of-tie).
+  *Design choice — the quantile-ranking mechanism itself has no textual analog; Locke never specifies a menu-vote procedure. It generalizes the "compare stake to something, pick a menu entry" shape every earlier menu vote in this file already used, but ranks each voter against an actual population's distribution rather than a fixed external number.*
+- **`voteReparationRate(self, founders)`** (`875-878`) — Calls
+  `voteByQuantileBracket(founders, choices, founders)` — the founders are
+  both the voters and their own reference population, since no larger
+  group exists yet at founding. Stored as `governmentRate`.
+  **A real consequence, found while testing this change**: because the
+  reference group is always just the two founders, and quantile ranking
+  is purely relative, two founders with *equal* claims — whether that's
+  1 each or 1000 each — always land on the mildest choice; there is no
+  variance within the reference group left to rank against, so no signal
+  about either founder's *absolute* holdings survives. This is a real
+  change from the previous absolute-reference mechanism (which scaled
+  with holdings regardless of the co-founder), documented here rather
+  than patched — consistent with this file's practice of reporting real
+  degeneracies (the K≥2 founding-legislature finding under
+  `voteGovernmentForm`, the milder-wins tie-break every menu vote shares)
+  rather than re-engineering around every one.
+  *Locke, Sect. 12 gives only a floor ("an ill bargain"), not a number, so the rate is set by collective decision. Sect. 95-96: one equal vote each, the body moving "whither the greater force carries it, which is the consent of the majority" — hence the median. Sect. 138 grounds keying the preference to holdings, though under this mechanism that's now relative standing within the founding pair, not absolute holdings. The choice menu remains a design choice; `environmentLandReparationStakeReference` no longer grounds this vote specifically (see that key's README entry — it still grounds `voteGovernmentForm` and `voteLandUse`).*
 - **`voteLandUse(self, members)`** (`779-788`) — The Sect. 124 standard binding
   non-members in the territory: a single vote over `environmentLandUseChoices`
   (strictest to most lenient, `"closed"` first), structurally identical to
@@ -307,21 +343,21 @@ government commit `9a70cff`); for that commit's original per-method citations se
   is passed in explicitly rather than read from `self.locke` because at
   founding it isn't stored on the founders yet when this vote runs.
   *Sect. 140: "it is fit every one who enjoys his share of the protection, should pay out of his estate his proportion for the maintenance of it" — a purpose (funding the Sect. 126 office) and majority consent (the vote itself) make this legitimate taxation, unlike the ordinary levy. But Locke never discusses executive compensation, and gives no basis for who should prefer what rate — the role-based preference rule (executor wants more, everyone else wants less) is this codebase's own construction, not textual, placed here as underdetermined. Executors voting themselves a raise is Sect. 199's "private separate advantage" in the most literal form the model has; whether that's an abuse depends on where the outcome lands relative to `environmentLandExecutorMaintenanceFraction` (see `runLevyPass` below).*
-- **`addToGovernment(self, government, newMember)`** (`970-989`) — Adds
+- **`addToGovernment(self, government, newMember)`** (`990-1006`) — Adds
   `newMember` to the shared `set()`, points their `locke["government"]` at it,
-  copies the standing `governmentRate` / `governmentLandUse` /
-  `governmentRedistribution` / `governmentExecutor` / `governmentExecutorPay`
-  / `governmentForm` / `governmentLegislature` onto them (the joiner
-  provisionally inherits the existing legislature verbatim; the
-  `reviewLegislature` call immediately after corrects it if the joiner's
-  own stake should actually change who holds power), zeros their
-  `grievance` and `executorGrievance`, then calls `reviewLegislature`,
-  `reviewRedistribution`, `reviewExecutor`, **and** `reviewExecutorPay` in
-  that order — a changed roster is an occasion for the legislative to
-  re-vote all three of the latter, but only after the legislature itself
-  is current, since all three now read it rather than full membership.
-  Rate, land-use, and form are not re-legislated.
-  *Locke, Sect. 97 grounds binding the joiner to the standing laws without a re-founding: consenting to incorporate "puts himself under an obligation... to submit to the determination of the majority." (Not Sect. 122 — that is about tacit compliance not conferring membership.)*
+  copies every standing government-law field onto them verbatim —
+  `governmentRate` / `governmentLandUse` / `governmentRedistribution` /
+  `governmentExecutor` / `governmentExecutorPay` / `governmentForm` /
+  `governmentLegislature` / `governmentLevyFraction` /
+  `lastLegislativeReviewTimestep` — zeros their `grievance` and
+  `executorGrievance` (`legislatureGrievance` already defaults to `0.0` in
+  `__init__`). **Does not** trigger any review immediately (a Phase 6
+  change — it used to call `reviewLegislature`/`reviewRedistribution`/
+  `reviewExecutor`/`reviewExecutorPay` right here): the joiner simply
+  waits, bound by the standing laws, for the next scheduled or
+  legislature-grievance-forced reconvening in `doGovernanceReview` like
+  every other member — a join is no longer itself an occasion.
+  *Locke, Sect. 97 grounds binding the joiner to the standing laws without a re-founding: consenting to incorporate "puts himself under an obligation... to submit to the determination of the majority." (Not Sect. 122 — that is about tacit compliance not conferring membership.) Sect. 153's "not necessary... that the legislative should be always in being" grounds not treating an ordinary join as its own occasion — real legislatures reconvene on a schedule, not continuously in response to every incremental change in membership.*
 - **`reviewRedistribution(self, government)`** (`1101-1112`) — Re-runs
   `voteRedistribution` — the vote itself is cast by `governmentLegislature`,
   judged against the *whole* `government` (the fix described under
@@ -331,7 +367,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   under a stable roster and holdings, `"proportional"` persists and
   grievance climbs to withdrawal (Sect. 222–243: dissolution, not reform,
   is the remedy for a legislature turned to faction advantage).
-  *Sect. 153: "it is not necessary... that the legislative should be always in being" — it meets on occasion, and a roster change or a failing law is an occasion.*
+  *Sect. 153: "it is not necessary... that the legislative should be always in being" — it meets on occasion; since Phase 6 that occasion is `environmentLandLegislativeReviewInterval`'s schedule or a `legislatureGrievance` threshold, not an ordinary roster change by itself (see `doGovernanceReview`).*
 - **`reviewExecutor(self, government)`** (`1015-1024`) — Re-runs
   `voteExecutor` over `governmentLegislature`, not full membership — under
   `"restricted"` forms, only the legislature gets a say in who executes,
@@ -353,83 +389,136 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `reviewExecutorPay` mirrors `reviewExecutor`'s structure
   exactly (same `len(members) < 2` guard on total government size, same
   re-vote-and-compare-and-write pattern) and is called at every occasion
-  `reviewExecutor` is — roster change (`addToGovernment`, `doInheritance`),
-  post-withdrawal replacement, and the executor-grievance-threshold review
-  — because executor identity is what `votePayFraction`'s preference
-  depends on, so any event that can change the executor set (or the
-  legislature's size relative to the executor set, which shifts whether
-  executors are a majority *of the legislature* now rather than of the
-  whole government) is also an occasion to re-vote pay. It runs
-  unconditionally alongside `reviewExecutor` at each of those sites, not
-  only when `reviewExecutor` itself reports a change — a government that
-  shrinks from 4 to 3 members without an executor turnover still flips the
-  executors from a tie to a majority, and the pay vote needs the chance to
-  respond to that.
+  `reviewExecutor` is — a scheduled or legislature-grievance-forced
+  reconvening (`doGovernanceReview`), a death (`doInheritance`), or
+  post-withdrawal replacement — because executor identity is what
+  `votePayFraction`'s preference depends on, so any event that can change
+  the executor set (or the legislature's size relative to the executor
+  set, which shifts whether executors are a majority *of the legislature*
+  now rather than of the whole government) is also an occasion to
+  re-vote pay. It runs unconditionally alongside `reviewExecutor` at each
+  of those sites, not only when `reviewExecutor` itself reports a change
+  — a government that shrinks from 4 to 3 members without an executor
+  turnover still flips the executors from a tie to a majority, and the
+  pay vote needs the chance to respond to that.
   *Design choice — pure call-sequencing, matching the existing `reviewRedistribution`/`reviewExecutor` pairing at every one of those sites; no distinct textual content beyond what `votePayFraction` and `attemptGovernmentFormation` already ground.*
+- **`voteLevyFraction(self, legislature, allMembers)` (`1075-1078`) /
+  `reviewLevyFraction(self, government)` (`1080-1091`)** — The seventh
+  founding law: calls `voteByQuantileBracket(legislature, choices,
+  allMembers)` — voters are the legislature, but the quantile breakpoints
+  come from `allMembers` (the whole government), not the legislature.
+  This is deliberate and necessary: a monarchy's legislature is always
+  exactly one member, and a quantile computed from a single data point is
+  meaningless (every breakpoint collapses to that one value, always
+  producing the lowest choice regardless of how landed the monarch
+  actually is — an inherent property of quantiles over one point, not an
+  implementation gap). A government is never smaller than 2 (`len < 2`
+  triggers dissolution everywhere already), so `allMembers` is always a
+  well-formed reference population — the same fix already applied to
+  `voteRedistribution`, judge a small voting body against the population
+  it actually governs, not against itself. `reviewLevyFraction` mirrors
+  `reviewExecutorPay`'s structure and call sites exactly, storing the
+  result as `governmentLevyFraction`, which `runLevyPass` reads directly
+  in place of a flat config constant.
+  *Sect. 138/140 (see `runLevyPass` above) ground the substance of what's being voted; the quantile mechanism itself is `voteByQuantileBracket`'s, grounded there. That the reference population differs from `voteReparationRate`'s (whole government here, just the founders there) is a design choice forced by the structural difference between a law re-voted across a growing body and one decided once at founding with no larger population yet to reference.*
 - **`territoryGovernmentFor(self, cell)`** (`965-975`) — Returns the `set()`
   government of the first living owner of `cell` that belongs to one, else
   `None`. Derived, not stored — territory moves as claims are made and decay.
   *Locke, Sect. 119: the dominion is the members' land.*
-- **`dissolveGovernmentIfUnviable(self, government)`** (`1165-1178`) — If fewer
+- **`dissolveGovernmentIfUnviable(self, government)`** (`1226-1242`) — If fewer
   than two members remain, nulls every survivor's
-  `government`/`governmentRate`/`governmentLandUse`/`governmentRedistribution`/`governmentExecutor`/`governmentExecutorPay`/`governmentForm`/`governmentLegislature`,
-  zeros their `grievance` and `executorGrievance`, clears the set. Trust scores
-  persist. Called from `doInheritance` (death) and `doGovernanceReview`
-  (withdrawal).
+  `government`/`governmentRate`/`governmentLandUse`/`governmentRedistribution`/`governmentExecutor`/`governmentExecutorPay`/`governmentForm`/`governmentLegislature`/`governmentLevyFraction`/`lastLegislativeReviewTimestep`,
+  zeros their `grievance`, `executorGrievance`, and `legislatureGrievance`,
+  clears the set. Trust scores persist. Called from `doInheritance` (death)
+  and `doGovernanceReview` (withdrawal).
   *Locke, Sect. 211: a society dissolves when the body "can no longer act as one"; a single member is not a body. The survivor "returning to the state of nature" with its trust intact matches Sect. 211's sequel — dissolved members "are at liberty... by erecting a new legislative."*
-- **`runLevyPass(self, government)`** (`1006-1042`) — Once per timestep per
+- **`runLevyPass(self, government)`** (`1094-1145`) — Once per timestep per
   government (the `lastLevyTimestep` guard makes later members skip; the roster
   is snapshotted so shuffled run-order and any same-timestep withdrawal do not
   change the denominator). Levies a flat per-capita
-  `environmentLandLevyFraction * mean(lastHarvest)` from every member (sugar
-  first, then spice, capped at what it holds) into a pool. First, the
-  government's voted `governmentExecutorPay` fraction of the pool is paid
-  directly to its executor(s), split evenly among them, and removed from the
-  pool. The remainder is redistributed the same timestep — `"equal"`: each
-  gets its own levy back scaled down by the same fraction the pool shrank by
-  (so a `governmentExecutorPay` deduction, applied uniformly, stays net-zero
-  on its own); `"proportional"`: each gets `remainingPool * (its claims /
-  total claims)`. Then
-  `grievance = max(0.0, grievance - (received - fairBaseline))` per member,
-  where `fairBaseline` is what an `"equal"` split of the *post-pay*
-  pool would have given that member — at `governmentExecutorPay = 0` this is
-  exactly the original formula (`fairBaseline == paid[member]`), verified to
-  reproduce the pre-existing numbers unchanged. **Separately**, whatever
-  `governmentExecutorPay` exceeds `environmentLandExecutorMaintenanceFraction`
-  is charged again as `excess`, and every member's `grievance` (executors
-  included) increases by `excess * (its own contribution / pool)` — this is
-  additive on top of the redistribution-fairness adjustment above, not a
-  replacement for it, and applies whether or not the pay fraction the
-  government is currently running was voted by a majority that benefits from
-  it. At or below the maintenance line, `excess` is `0` and nothing accrues.
-  *Sect. 138 (the taking); Sect. 199 (the `"proportional"` concentration). The flat per-capita basis is chosen so `"proportional"` concentrates toward the land-rich by construction, independent of any harvest/claims correlation. Net-zero at the body level for the redistributed remainder; a persistent common fund beyond the executor's cut is out of scope. The executor-pay cut itself is Sect. 140 up to the maintenance line: "it is fit every one who enjoys his share of the protection, should pay out of his estate his proportion for the maintenance of it" — a purpose (funding the Sect. 126 office) and majority consent (`votePayFraction`), unlike the ordinary levy which funds nothing and is Lockean only as the Sect. 222 wrong. Past that line the same payment stops being maintenance and becomes Sect. 138's "any part of his property without his own consent" again — consent from a self-interested majority (see `votePayFraction`) is not the "indifferent judge" Sect. 125 would require to make an above-maintenance rate legitimate merely because it was voted. `environmentLandExecutorMaintenanceFraction` and the excess formula's linearity are design choices — Locke draws the maintenance/taking line qualitatively, not numerically.*
-- **`doGovernanceReview(self)`** (`1115-1156`) — Called from `doTrading`. First,
+  `governmentLevyFraction * mean(lastHarvest)` from every member (sugar
+  first, then spice, capped at what it holds) into a pool — **every**
+  member is taxed regardless of `governmentForm`; only the *payout* below
+  differs by form. First, the government's voted `governmentExecutorPay`
+  fraction of the pool is paid directly to its executor(s), split evenly
+  among them, and removed from the pool. The remainder is redistributed
+  the same timestep, and here **democracy and restricted forms diverge**:
+  under `"democracy"` (`governmentLegislature == government`), behavior is
+  exactly as before this phase — `"equal"` gives each member back its own
+  levy scaled down by the same fraction the pool shrank by (net-zero on
+  its own under a legitimate executor-pay deduction); `"proportional"`
+  gives `remainingPool * (its claims / total claims)`. Under a
+  **restricted** form, any member *not* in `governmentLegislature` gets
+  `0.0` regardless of rule — the whole `remainingPool`, built from every
+  member's contribution including excluded subjects', is split only among
+  the legislature: evenly under `"equal"` (no longer "get your own money
+  back" once a subject's contribution is never refunded to anyone in
+  particular — the legislature splits the *whole* pool amongst itself),
+  by claims share among the legislature under `"proportional"`. Then
+  `grievance = max(0.0, grievance - (received - fairBaseline))` per
+  member, where `fairBaseline` is what an `"equal"` split of the
+  *post-pay* pool would have given that member under democracy's
+  formula — an excluded subject's `received` of `0.0` against a positive
+  `fairBaseline` makes this the same formula *increase* grievance sharply,
+  the mechanism was already bidirectional, just never exercised toward
+  total exclusion before this phase. Separately, an excluded member also
+  accrues `environmentLandLegislatureGrievancePenalty` to
+  `legislatureGrievance` every timestep it's excluded — a third,
+  independent channel (see `doGovernanceReview`) that forces an early
+  reconvening rather than feeding withdrawal. **Also separately**,
+  whatever `governmentExecutorPay` exceeds
+  `environmentLandExecutorMaintenanceFraction` is charged again as
+  `excess`, and every member's `grievance` (executors included) increases
+  by `excess * (its own contribution / pool)`; at or below the
+  maintenance line, `excess` is `0` and nothing accrues.
+  *Sect. 138 (the taking); Sect. 199 (the `"proportional"` concentration, and now the restricted-form exclusion itself — a legislature "having a distinct interest from the rest of the community" in its starkest form, keeping the whole pool while subjects are still taxed). The flat per-capita basis is chosen so `"proportional"` concentrates toward the land-rich by construction, independent of any harvest/claims correlation. The executor-pay cut itself is Sect. 140 up to the maintenance line: "it is fit every one who enjoys his share of the protection, should pay out of his estate his proportion for the maintenance of it" — a purpose (funding the Sect. 126 office) and majority consent (`votePayFraction`), unlike the ordinary levy which funds nothing and is Lockean only as the Sect. 222 wrong. Past that line the same payment stops being maintenance and becomes Sect. 138's "any part of his property without his own consent" again. `environmentLandExecutorMaintenanceFraction`, the excess formula's linearity, and the restricted-form payout split are design choices — Locke draws the relevant lines qualitatively, not numerically or mechanically.*
+- **`doGovernanceReview(self)`** (`1160-1223`) — Called from `doTrading`. First,
   the **executor-neglect channel**: a non-executor member counts its own debts
   that ripened (`createdTimestep + collectionGrace`) at least
   `environmentLandExecutorNeglectGraceTimesteps` ago and whose debtor is alive
   and solvent, and adds `environmentLandExecutorNeglectPenalty` per such debt to
   its `executorGrievance` (the earlier `doForcefulDebtCollection` already tried
   the member's own reach, so anything still outstanding is genuinely beyond it).
-  Then the levy pass; if this member's `grievance` exceeds
+  Then the levy pass (which is also where `legislatureGrievance` accrues —
+  see `runLevyPass`); if this member's `grievance` exceeds
   `environmentLandGrievanceThreshold` it **withdraws** (§240) — leaves the set,
   nulls its government fields (including `governmentForm`/
-  `governmentLegislature`), zeros both grievances, then
-  `dissolveGovernmentIfUnviable`, then `reviewLegislature`, `reviewExecutor`,
-  **and** `reviewExecutorPay` if the body survives (a withdrawing executor
-  must be replaced, and a smaller body can flip both the legislature's
-  membership and the pay vote's majority — legislature first, since the
-  other two now read it). Else: `reviewLegislature` runs unconditionally
-  before either threshold check, since both the redistribution and executor
-  reviews below now read `governmentLegislature`; then if summed `grievance`
-  exceeds `environmentLandGovernmentReviewThreshold`, `reviewRedistribution`
-  (decay on a change); and if summed `executorGrievance` exceeds
-  `environmentLandExecutorReviewThreshold`, `reviewExecutor` (zero
-  everyone's `executorGrievance` on a change) followed unconditionally by
-  `reviewExecutorPay` — pay is re-voted whenever executor is reconsidered, not
-  only when the executor set actually changes. `governmentForm` itself is
-  never touched by any branch here — only withdrawal-triggered dissolution
-  ends it, per Sect. 149's "supreme power to... alter the legislative" being
-  the sole exception to Sect. 134's "sacred and unalterable" placement.
+  `governmentLegislature`/`governmentLevyFraction`), zeros all three
+  grievances, then `dissolveGovernmentIfUnviable`, then `reviewLegislature`,
+  `reviewExecutor`, `reviewExecutorPay`, **and** `reviewLevyFraction` if the
+  body survives (a withdrawing executor must be replaced, and a smaller body
+  can flip both the legislature's membership and the pay/levy votes'
+  majorities — legislature first, since the other three now read it),
+  stamping `lastLegislativeReviewTimestep` and zeroing `legislatureGrievance`
+  for every survivor since a full reconvening just happened.
+
+  Otherwise, **a full reconvening — `reviewLegislature`,
+  `reviewRedistribution`, `reviewExecutor`, `reviewExecutorPay`, and
+  `reviewLevyFraction`, in that order — fires on either of two independent
+  triggers**, checked in this order: (1) summed `legislatureGrievance`
+  across the government exceeds `environmentLandLegislatureGrievanceThreshold`
+  — the collective frustration of subjects excluded from payout under a
+  restricted form forces the legislature to revisit itself ahead of
+  schedule; or (2) `environmentLandLegislativeReviewInterval` timesteps
+  have elapsed since `lastLegislativeReviewTimestep` — the routine,
+  scheduled case (a value of `1` reconvenes every timestep). Either
+  trigger runs the identical five reviews, then stamps
+  `lastLegislativeReviewTimestep` and zeros `legislatureGrievance` for
+  every member — a legislature-grievance-forced reconvening also resets
+  the interval clock, so the two triggers don't compound. Within that
+  block, `reviewRedistribution`'s decay and `reviewExecutor`'s
+  `executorGrievance` reset still only fire when that specific review
+  actually changed something. `governmentForm` itself is never touched by
+  any branch here — only withdrawal-triggered dissolution ends it, per
+  Sect. 149's "supreme power to... alter the legislative" being the sole
+  exception to Sect. 134's "sacred and unalterable" placement.
+  **Not the same as an ordinary join**: `addToGovernment` no longer
+  triggers any of these reviews immediately (Phase 6) — a joiner just
+  inherits the government's current values and waits for the next
+  scheduled or grievance-forced reconvening like everyone else, per
+  Sect. 153's "not necessary... that the legislative should be always in
+  being."
+  *Locke, Sect. 240 ("the people shall be judge" of whether the legislature has broken trust) — each member judging its own government; Sect. 225 ("a long train of abuses") — cumulative, not one bad law. Sect. 156/152 ground the executor-neglect channel: the executor holds "a fiduciary trust... for the safety of the people" and is displaced by the legislative for maladministration — but replacement, not dissolution, and only if there is a better candidate. Sect. 199's "distinct interest from the rest of the community" grounds the legislature-grievance channel specifically — excluded subjects registering that the body governing them is not answerable to them, distinct from `grievance`'s narrower "I personally received less than my fair share" and from `executorGrievance`'s narrower "my own debt specifically went unenforced." This is **not** Sect. 125's "known and indifferent judge": self-judgment is what Sect. 125 identifies as the problem. Sect. 125 stays unaddressed — the model has no contested facts, only transparent transfers. The interval itself, and the choice to let legislature-grievance override it rather than merely add to a shared counter, are design choices.*
   *Locke, Sect. 240 ("the people shall be judge" of whether the legislature has broken trust) — each member judging its own government; Sect. 225 ("a long train of abuses") — cumulative, not one bad law. Sect. 156/152 ground the second channel: the executor holds "a fiduciary trust... for the safety of the people" and is displaced by the legislative for maladministration — but replacement, not dissolution, and only if there is a better candidate. This is **not** Sect. 125's "known and indifferent judge": self-judgment is what Sect. 125 identifies as the problem. Sect. 125 stays unaddressed — the model has no contested facts, only transparent transfers.*
 - **`resetTrustIn(self, violator)`** (`1054-1058`) — Zeroes
   `self.locke["trust"][violator.ID]` if nonzero. Called on the Locke agents
@@ -485,14 +574,22 @@ government commit `9a70cff`); for that commit's original per-method citations se
   debts/receivables, calls `government.discard(self)`, then
   `dissolveGovernmentIfUnviable`, and — if the body still has two or more
   members — `reviewLegislature`, `reviewRedistribution`, `reviewExecutor`,
-  **and** `reviewExecutorPay` over the survivors, in that order (a death
-  changes the roster — an occasion for the legislative, Sect. 153; the
-  executor may have been the one who died, Sect. 152; the deceased may
-  have been a legislator, changing who holds power under a restricted
-  form; and a smaller surviving body can shift the executor-pay vote's
-  majority even without an executor turnover). `governmentForm` is not
-  re-examined — a government's form outlives any one member's death; only
-  who currently holds it can change. Trust scores are left intact.
+  `reviewExecutorPay`, **and** `reviewLevyFraction` over the survivors, in
+  that order (a death changes the roster — an occasion for the
+  legislative, Sect. 153; the executor may have been the one who died,
+  Sect. 152; the deceased may have been a legislator, changing who holds
+  power under a restricted form; a smaller surviving body can shift the
+  executor-pay vote's majority even without an executor turnover; and the
+  levy fraction's reference population — the whole surviving government —
+  has shrunk by one, which can move its quantile breakpoints). Death is
+  still an unconditional, immediate reconvening regardless of
+  `environmentLandLegislativeReviewInterval` — the interval only bounds
+  the *routine* case in `doGovernanceReview`. Every survivor's
+  `lastLegislativeReviewTimestep` is reset to the current timestep and
+  `legislatureGrievance` zeroed, exactly as any other reconvening would.
+  `governmentForm` is not re-examined — a government's form outlives any
+  one member's death; only who currently holds it can change. Trust
+  scores are left intact.
   *Locke, Sect. 72 grounds the land-splitting half ("in certain proportions, according to the law and custom of each country" — the equal split is within that space). Sect. 211 grounds the dissolution (see `dissolveGovernmentIfUnviable`). The debt-discharge half is a plain design choice — Chapter V does not say whether a reparation debt survives a party's death.*
 - **`updateValues(self)`** (`1138-1142`) — Per-timestep hook that triggers
   `processLandAbandonment` and `settleDebtsVoluntarily`.
@@ -553,7 +650,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   This is the only place in the whole codebase a `Locke` agent object is
   actually instantiated during simulation setup or dead-agent replacement.
   *Design choice — Python object-instantiation plumbing.*
-- **Default configuration dict** (`~1914-1928`) — Adds, as hardcoded defaults:
+- **Default configuration dict** (`~1845-1928`) — Adds, as hardcoded defaults:
   `"environmentLandDecayTimesteps": 50`,
   `"environmentLandExecutorCount": 1`,
   `"environmentLandExecutorMaintenanceFraction": 0.2`,
@@ -562,17 +659,24 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `"environmentLandExecutorPartialityPenalty": 0.5`,
   `"environmentLandExecutorPayChoices": [0.0, 0.1, 0.2, 0.4, 0.7]`,
   `"environmentLandExecutorPursuitWeight": 0.5`,
-  `"environmentLandExecutorReviewThreshold": 15.0`,
   `"environmentLandForcefulCollectionGraceTimesteps": 1`,
-  `"environmentLandGovernmentReviewThreshold": 10.0`,
   `"environmentLandGrievanceDecay": 0.5`,
   `"environmentLandGrievanceThreshold": 6.0`,
+  `"environmentLandLegislativeReviewInterval": 10`,
+  `"environmentLandLegislatureGrievancePenalty": 0.5`,
+  `"environmentLandLegislatureGrievanceThreshold": 6.0`,
   `"environmentLandLegislatureSize": 1`,
-  `"environmentLandLevyFraction": 0.3`,
+  `"environmentLandLevyFractionChoices": [0.1, 0.3, 0.5, 0.7, 0.9]`,
   `"environmentLandReparationRateChoices": [1.25, 1.5, 2.0, 3.0]`,
   `"environmentLandReparationStakeReference": 8`,
   `"environmentLandTrustThresholdRange": [4, 8]`, and
   `"environmentLandUseChoices": ["closed", 0.5, 0.35, 0.2]`.
+  Phase 6 removed three now-dead keys entirely rather than leaving them
+  orphaned: `environmentLandLevyFraction` (superseded by the voted
+  `environmentLandLevyFractionChoices`), `environmentLandGovernmentReviewThreshold`,
+  and `environmentLandExecutorReviewThreshold` (both threshold gates
+  removed from `doGovernanceReview`, which now reviews every legislative
+  reconvening unconditionally — see that method's entry above).
   This is load-bearing: the config-file-override loop
   (`for opt in configuration: if opt in options: ...`) only applies a
   `config.json` value for a key that *already exists* in this dict — a key
@@ -629,19 +733,30 @@ government commit `9a70cff`); for that commit's original per-method citations se
   pre-emptively.
   *Design choice (the size); the underlying Sect. 132 taxonomy — see `voteGovernmentForm` / `findLegislature` above.*
 - **The governance tuning keys** —
-  `environmentLandLevyFraction` (`0.9`), `environmentLandGrievanceThreshold`
-  (`10.0`), `environmentLandGovernmentReviewThreshold` (`10.0`),
-  `environmentLandGrievanceDecay` (`0.5`), and the seven executor keys
+  `environmentLandLevyFractionChoices` (`[0.1, 0.3, 0.5, 0.7, 0.9]`,
+  matching the code default — the levy fraction is now voted rather than
+  a flat config constant, see `voteLevyFraction` above),
+  `environmentLandGrievanceThreshold` (`10.0`),
+  `environmentLandGrievanceDecay` (`0.5`),
+  `environmentLandLegislativeReviewInterval` (`10`, matching the code
+  default — the timestep interval between mandatory legislative
+  reconvenings), `environmentLandLegislatureGrievancePenalty` (`0.5`) and
+  `environmentLandLegislatureGrievanceThreshold` (`6.0`, both matching
+  code defaults — the third grievance channel that can force an early
+  reconvening ahead of the interval), and the seven executor keys
   `environmentLandExecutorMaintenanceFraction` (`0.2`),
   `environmentLandExecutorNeglectGraceTimesteps` (`5`),
   `environmentLandExecutorNeglectPenalty` (`0.5`),
   `environmentLandExecutorPartialityPenalty` (`0.5`),
   `environmentLandExecutorPayChoices` (`[0.0, 0.1, 0.2, 0.4, 0.7]`),
-  `environmentLandExecutorPursuitWeight` (`0.5`),
-  `environmentLandExecutorReviewThreshold` (`15.0`); tuned against 250-step
+  `environmentLandExecutorPursuitWeight` (`0.5`); tuned against 250-step
   debug runs so that withdrawal (levy grievance) is a recurring minority event
   and executor replacement fires on roster churn — Sect. 225/230.
-  *Design choices (all the numbers); the mechanisms are Sect. 138/199/140 (levy and executor pay), Sect. 240/199 (withdrawal and partiality), Sect. 126/152/156 (executor) — see `voteRedistribution` / `voteExecutor` / `doGovernanceReview` / `runLevyPass` / `doForcefulDebtCollection` above.*
+  `environmentLandGovernmentReviewThreshold` and
+  `environmentLandExecutorReviewThreshold`, both previously listed here,
+  are gone along with the code defaults they overrode — see the
+  `sugarscape.py` entry above.
+  *Design choices (all the numbers); the mechanisms are Sect. 138/199/140 (levy and executor pay), Sect. 240/199 (withdrawal and partiality), Sect. 126/152/156 (executor), Sect. 153 (the legislative-reconvening interval) — see `voteRedistribution` / `voteExecutor` / `doGovernanceReview` / `runLevyPass` / `doForcefulDebtCollection` / `voteLevyFraction` above.*
 - **`environmentLandTrustThresholdRange: [1, 1]`** (new key) — Overrides the
   code default `[4, 8]` down for this scenario, so trust accrues fast and
   governments grow to many members — which the redistribution/rebellion
@@ -749,10 +864,14 @@ government commit `9a70cff`); for that commit's original per-method citations se
   already used; Locke-only.
   *Design choice — documentation; see `voteExecutor` above.*
 - **`environmentLandExecutorNeglectGraceTimesteps` /
-  `environmentLandExecutorNeglectPenalty` / `environmentLandExecutorReviewThreshold`
-  entries** (new) — Document the executor neglect window (measured from when a
-  debt ripens), the per-debt-per-timestep grievance, and the summed threshold
-  that reconvenes the government to re-vote its executor; all Locke-only.
+  `environmentLandExecutorNeglectPenalty` entries** (new) — Document the
+  executor neglect window (measured from when a debt ripens) and the
+  per-debt-per-timestep grievance it accrues to `executorGrievance`;
+  Locke-only. The `environmentLandExecutorReviewThreshold` entry that
+  previously sat alongside these is gone — since Phase 6,
+  `reviewExecutor` runs at every legislative reconvening unconditionally
+  rather than waiting for a summed-`executorGrievance` threshold (see
+  `doGovernanceReview` above).
   *Design choice — documentation; see `voteExecutor` / `reviewExecutor` above.*
 - **`environmentLandExecutorPartialityPenalty` / `environmentLandExecutorPursuitWeight`
   entries** (new) — Document the partiality grievance (fed into ordinary
@@ -764,21 +883,59 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `votePayFraction`/`governmentExecutorPay`, and the maintenance ceiling
   above which the excess accrues grievance in `runLevyPass`; both Locke-only.
   *Design choice — documentation; see `votePayFraction` / `runLevyPass` above.*
-- **`environmentLandReparationRateChoices` / `environmentLandReparationStakeReference`
-  entries** (new) — Document the reparation-rate menu, the founding vote, the
-  lone-owner floor, and the stake reference (also reused by the land-use vote
-  and, now, `voteGovernmentForm`'s founding-form preference); both Locke-only.
-  *Design choice — documentation; see `voteReparationRate` above.*
-- **`environmentLandLegislatureSize` entry** (new) — Documents the
-  oligarchy/monarchy ruling-body size, that `1` behaves as monarchy and
-  `>1` as oligarchy through one shared selection mechanism, and that it
-  has no effect under `"democracy"`; Locke-only.
+- **`environmentLandReparationRateChoices` entry** (new, rewritten for
+  Phase 6) — Documents the reparation-rate menu and that it's now voted
+  via the shared quantile-bracket mechanism (`findQuantileChoice`/
+  `voteByQuantileBracket`), each founder's own claims ranked against the
+  founding pair itself; notes the documented equal-claims finding (two
+  founders with identical claims, however large, always land on the
+  mildest choice — no variance to rank against); Locke-only.
+  **`environmentLandReparationStakeReference` entry** (unchanged
+  citation) — Documents the stake reference, now grounding only
+  `voteGovernmentForm`'s founding-form preference and `voteLandUse` —
+  no longer `voteReparationRate`, which moved off it in Phase 6.
+  *Design choice — documentation; see `voteReparationRate` / `voteGovernmentForm` / `voteLandUse` above.*
+- **`environmentLandLegislatureSize` entry** (new, extended for Phase 6) —
+  Documents the oligarchy/monarchy ruling-body size, that `1` behaves as
+  monarchy and `>1` as oligarchy through one shared selection mechanism,
+  that it has no effect under `"democracy"`, and the new literal string
+  `"all"` sentinel that forces every government to `"democracy"`
+  unconditionally regardless of `voteGovernmentForm`'s outcome — a total
+  kill-switch for the concentration mechanism, useful as a pure-
+  direct-democracy control condition; Locke-only.
   *Design choice — documentation; see `voteGovernmentForm` / `findLegislature` above.*
-- **`environmentLandUseChoices` / `environmentLandLevyFraction` /
-  `environmentLandGrievanceThreshold` / `environmentLandGovernmentReviewThreshold`
-  / `environmentLandGrievanceDecay` entries** (new) — Document the land-use
-  menu, the levy fraction, and the three grievance thresholds; all Locke-only.
+- **`environmentLandLevyFractionChoices` entry** (new, replacing the old
+  `environmentLandLevyFraction` entry) — Documents the levy-fraction
+  menu and that the levy fraction is now the seventh founding law, voted
+  via the same shared quantile-bracket mechanism as reparation rate but
+  with the *whole government* (never smaller than 2) as the reference
+  population rather than the legislature, specifically to avoid the
+  single-point-reference degeneracy a monarchy's size-1 legislature would
+  otherwise produce; Locke-only.
+  *Design choice — documentation; see `voteLevyFraction` above.*
+- **`environmentLandUseChoices` / `environmentLandGrievanceThreshold` /
+  `environmentLandGrievanceDecay` entries** (new) — Document the land-use
+  menu and the withdrawal-grievance threshold/decay; all Locke-only. The
+  old `environmentLandGovernmentReviewThreshold` entry is gone — Phase 6
+  removed the key it documented (see the `sugarscape.py` entry above).
   *Design choice — documentation; see `voteLandUse` / `voteRedistribution` / `doGovernanceReview` above.*
+- **`environmentLandLegislativeReviewInterval` entry** (new) — Documents
+  the timestep interval between mandatory full legislative reconvenings
+  (`reviewLegislature`/`reviewRedistribution`/`reviewExecutor`/
+  `reviewExecutorPay`/`reviewLevyFraction`, all run together), that a
+  value of `1` reproduces "every timestep," and that death and consent
+  withdrawal still trigger an *immediate* reconvening regardless of the
+  interval; Locke-only.
+  *Design choice — documentation; Sect. 153's "not necessary... always in being" grounds having an occasion at all, not any particular interval length — see `doGovernanceReview` above.*
+- **`environmentLandLegislatureGrievancePenalty` / `environmentLandLegislatureGrievanceThreshold`
+  entries** (new) — Document the third grievance channel: the per-timestep
+  penalty accrued by a member excluded from the legislature under a
+  restricted form and taxed but never paid (see `runLevyPass` above), and
+  the summed-across-the-government threshold that, once crossed, forces
+  an early reconvening ahead of the interval; distinct from both
+  `grievance` (withdrawal) and `executorGrievance` (executor replacement
+  only); Locke-only.
+  *Design choice — documentation; Sect. 199 grounds the underlying grievance (rebellion begins with those excluded from power feeling the pinch), the threshold value and mechanism are a design choice — see `runLevyPass` / `doGovernanceReview` above.*
 - **`environmentLandTrustThresholdRange` entry** (new) —
   Documents the trust-threshold-range config key, that it's independently
   drawn per agent at birth and not inherited from a parent, its Locke-only
@@ -792,8 +949,13 @@ A standalone, runnable example scenario for the `locke` decision model, with
 its own `__README__` summary field. Notable settings distinct from the main
 `config.json`: `agentInheritancePolicy: "children"`,
 `environmentLandDecayTimesteps: 10`, `environmentLandTrustThresholdRange: [1, 2]`,
-and the reparation / land-use / levy / grievance / executor keys set to the same
-values as the main config so the governance machinery is exercised when the
-example is run.
+and the reparation / land-use / levy-fraction-choices / grievance / executor /
+legislature-review-interval / legislature-grievance keys set to the same values
+as the main config (`environmentLandLegislativeReviewInterval: 10`,
+`environmentLandLegislatureGrievancePenalty: 0.5`,
+`environmentLandLegislatureGrievanceThreshold: 6.0`,
+`environmentLandLevyFractionChoices: [0.1, 0.3, 0.5, 0.7, 0.9]`) so the full
+governance machinery, including the seventh founding vote and the third
+grievance channel, is exercised when the example is run.
 
 *Design choice — a runnable scenario file, not a textual claim.*

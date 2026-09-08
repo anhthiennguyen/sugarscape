@@ -53,33 +53,63 @@ class; a government is a bare `set()` of member agents).
 
 ### Recurring patterns
 
-- **Six founding votes** (`voteGovernmentForm`, `voteReparationRate`,
-  `voteLandUse`, `voteRedistribution`, `voteExecutor`, `votePayFraction`),
-  voted in `attemptGovernmentFormation`, stored per member
-  (`governmentForm` / `governmentRate` / `governmentLandUse` /
+- **Seven founding votes** (`voteGovernmentForm`, `voteReparationRate`,
+  `voteLandUse`, `voteRedistribution`, `voteExecutor`, `votePayFraction`,
+  `voteLevyFraction`), voted in `attemptGovernmentFormation`, stored per
+  member (`governmentForm` / `governmentRate` / `governmentLandUse` /
   `governmentRedistribution` / `governmentExecutor` /
-  `governmentExecutorPay`), copied onto joiners in `addToGovernment` (§97).
+  `governmentExecutorPay` / `governmentLevyFraction`), copied onto
+  joiners in `addToGovernment` (§97) with no re-vote triggered by an
+  ordinary join (see the reconvening-interval bullet below).
   `voteGovernmentForm` runs first and decides `findLegislature` — who
-  actually casts the other five votes (full membership under
-  `"democracy"`, the top-`environmentLandLegislatureSize` landholders
-  under `"oligarchy"`/`"monarchy"`; both are the same mechanism at
-  different K). `voteRedistribution`, `voteExecutor`, and `votePayFraction`
-  are re-voted on any roster change (`reviewRedistribution` /
-  `reviewExecutor` / `reviewExecutorPay`, always preceded by
-  `reviewLegislature` since all three now read `governmentLegislature`
-  rather than full membership — the last of the three always runs
-  alongside `reviewExecutor`, since its preference depends on executor
-  membership); `voteReparationRate`, `voteLandUse`, and now
-  `voteGovernmentForm` itself are §153/§134-frozen (§149 — dissolution — is
-  the only way a government's form ever changes; see `doGovernanceReview`).
-- **Two grievance channels**: `grievance` (withdrawal §240 + dissolution
+  actually casts the other six votes (full membership under
+  `"democracy"` or the literal config sentinel
+  `environmentLandLegislatureSize: "all"`, which forces `"democracy"`
+  unconditionally regardless of the vote outcome; the top-K landholders
+  under `"oligarchy"`/`"monarchy"` otherwise — both the same mechanism at
+  different K). `voteReparationRate` and `voteLevyFraction` share one
+  quantile-bracket mechanism (`findQuantileChoice`/
+  `voteByQuantileBracket`): each voter's claims are ranked by
+  fractional-position interpolation against a reference population's
+  sorted claims to pick a menu choice, then the median of voters' choices
+  wins. `voteLevyFraction` deliberately uses the *whole government* as
+  its reference population rather than the (possibly size-1, under
+  monarchy) legislature — a size-1 reference collapses every quantile
+  breakpoint to that one value, always producing the mildest choice
+  regardless of actual wealth. `voteReparationRate`, `voteLandUse`, and
+  `voteGovernmentForm` itself are frozen at founding (§149 — dissolution
+  — is the only way a government's form ever changes); `voteRedistribution`,
+  `voteExecutor`, `votePayFraction`, and `voteLevyFraction` are re-voted
+  at every legislative reconvening (see the interval bullet below).
+- **Legislature-exclusive payout under restricted forms**: under
+  `"oligarchy"`/`"monarchy"`, every member is still taxed by the levy,
+  but only `governmentLegislature` members are paid back — a
+  non-legislature member gets `0.0` regardless of the redistribution
+  rule (`runLevyPass`). Under `"democracy"` (including the `"all"`
+  sentinel, which forces it) payout still reaches everyone, unchanged
+  since Phase 3/5.
+- **Legislative reconvening is scheduled, not per-join or purely
+  threshold-driven**: `environmentLandLegislativeReviewInterval`
+  timesteps must pass since a government's `lastLegislativeReviewTimestep`
+  before `reviewLegislature`/`reviewRedistribution`/`reviewExecutor`/
+  `reviewExecutorPay`/`reviewLevyFraction` all run together again (§153
+  — "not necessary... always in being"); a value of `1` reproduces "every
+  timestep." An ordinary join is no longer itself an occasion — a joiner
+  just inherits current law values. Death and consent withdrawal still
+  force an *immediate* reconvening regardless of the interval.
+- **Three grievance channels**: `grievance` (withdrawal §240 + dissolution
   §211) — fed by the redistributive levy (§138/199, now measured against
   the *whole* government even when a small legislature casts the vote —
   see `voteRedistribution`), by executor partiality (§199, in
   `doForcefulDebtCollection`), and by executor pay above
   `environmentLandExecutorMaintenanceFraction` (§138, in `runLevyPass`);
   `executorGrievance` (unenforced debt, §156) → executor replacement only
-  (§152).
+  (§152); `legislatureGrievance` (§199, accrued per timestep by a member
+  excluded from the legislature under a restricted form and taxed but
+  never paid) → once the government's summed `legislatureGrievance`
+  crosses `environmentLandLegislatureGrievanceThreshold`, it forces an
+  early reconvening ahead of the interval, distinct from both other
+  channels (`doGovernanceReview`).
 - **Rare-mechanism findings**: several mechanisms (`restrained`, the
   `executorGrievance` channel) are coherent and scratch-tested but seldom fire in
   practice. Treat that rarity as a Lockean result (§225/§230 — rebellion is a
