@@ -53,16 +53,22 @@ class; a government is a bare `set()` of member agents).
 
 ### Recurring patterns
 
-- **Four founding votes** (`voteReparationRate`, `voteLandUse`,
-  `voteRedistribution`, `voteExecutor`), voted in `attemptGovernmentFormation`,
-  stored per member (`governmentRate` / `governmentLandUse` /
-  `governmentRedistribution` / `governmentExecutor`), copied onto joiners in
-  `addToGovernment` (§97). `voteRedistribution` and `voteExecutor` are re-voted
-  on any roster change (`reviewRedistribution` / `reviewExecutor`); the other two
-  are §153-frozen.
-- **Two grievance channels**: `grievance` (the redistributive levy, §138/199) →
-  withdrawal (§240) + dissolution (§211); `executorGrievance` (unenforced debt,
-  §156) → executor replacement only (§152).
+- **Five founding votes** (`voteReparationRate`, `voteLandUse`,
+  `voteRedistribution`, `voteExecutor`, `votePayFraction`), voted in
+  `attemptGovernmentFormation`, stored per member (`governmentRate` /
+  `governmentLandUse` / `governmentRedistribution` / `governmentExecutor` /
+  `governmentExecutorPay`), copied onto joiners in `addToGovernment` (§97).
+  `voteRedistribution`, `voteExecutor`, and `votePayFraction` are re-voted on
+  any roster change (`reviewRedistribution` / `reviewExecutor` /
+  `reviewExecutorPay` — the last always runs alongside `reviewExecutor`,
+  since its preference depends on executor membership); the other two are
+  §153-frozen.
+- **Two grievance channels**: `grievance` (withdrawal §240 + dissolution
+  §211) — fed by the redistributive levy (§138/199), by executor partiality
+  (§199, in `doForcefulDebtCollection`), and by executor pay above
+  `environmentLandExecutorMaintenanceFraction` (§138, in `runLevyPass`);
+  `executorGrievance` (unenforced debt, §156) → executor replacement only
+  (§152).
 - **Rare-mechanism findings**: several mechanisms (`restrained`, the
   `executorGrievance` channel) are coherent and scratch-tested but seldom fire in
   practice. Treat that rarity as a Lockean result (§225/§230 — rebellion is a

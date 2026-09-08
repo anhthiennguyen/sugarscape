@@ -28,8 +28,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `frozenset` of the member(s) appointed to collect on the society's
   behalf — Sect. 126/130), and
   `executorGrievance` (`0.0`; a separate accumulator for the Sect. 156
-  complaint, drives executor replacement only, never withdrawal).
-  *Design choice — bookkeeping structure, no textual analog. `trustThreshold`, `restrained`, `grievance`, `executorGrievance` are all per-agent and never inherited (Sect. 116/118 for political disposition; Sect. 12 restraint and one's own grievance are personal). The government-law fields (rate, land-use, redistribution, executor) are copied from existing members on join (Sect. 97), not from a parent.*
+  complaint, drives executor replacement only, never withdrawal), and
+  `governmentExecutorPay` (the fraction of the levy pool paid to the
+  executor(s), one entry from `environmentLandExecutorPayChoices` —
+  Sect. 140 maintenance up to a point, Sect. 138 beyond it).
+  *Design choice — bookkeeping structure, no textual analog. `trustThreshold`, `restrained`, `grievance`, `executorGrievance` are all per-agent and never inherited (Sect. 116/118 for political disposition; Sect. 12 restraint and one's own grievance are personal). The government-law fields (rate, land-use, redistribution, executor, executor pay) are copied from existing members on join (Sect. 97), not from a parent.*
 - **`cellOwners(self, cell)`** (`557-560`) — Lazily creates and returns
   `cell.owners` (a `{agent: share}` dict) the first time it's touched. The
   central accessor for reading ownership anywhere in the class.
@@ -111,7 +114,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   above its own metabolic need (sugar first, then spice), removing the debt
   once fully paid. No proximity requirement.
   *Locke, Sect. 37: "the intrinsic value of things... depends only on their usefulness to the life of man," combined with Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life." Together these ground value as commensurable across different useful goods, but it's a stretched analogy: Locke's money is valuable specifically because it is NOT one of the perishable staples, whereas sugar and spice here are the staples themselves — the "same nominal value regardless of resource" rule has no tight single-passage match.*
-- **`doForcefulDebtCollection(self)`** (`679-719`) — Runs every timestep; for
+- **`doForcefulDebtCollection(self)`** (`766-813`) — Runs every timestep; for
   every neighboring agent, for every debt that neighbor owes older than
   `environmentLandForcefulCollectionGraceTimesteps`, seizes whatever
   sugar/spice the debtor holds (capped at the debt) and pays it to the
@@ -130,7 +133,19 @@ government commit `9a70cff`); for that commit's original per-method citations se
   debts of agents adjacent to it, so recognition spreads as it moves; the flag,
   once set, persists on the debt record until the debt is settled. When a
   seizure lands on a `Locke` debtor its `restrained` flag is set (Sect. 12).
-  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes).*
+  **Partiality**: immediately after any executor successfully seizes on its
+  *own* debt, it checks every other government member for a debt receivable
+  of their own that is already collectible (same grace window, alive and
+  solvent debtor) but hasn't been reached — for each such member found, it
+  accrues `environmentLandExecutorPartialityPenalty` to *that member's*
+  ordinary `grievance` (the same field the levy's `"proportional"` wrong
+  feeds, not `executorGrievance`, which is replacement-only). An executor
+  serving itself while a fellow member visibly waits is evidence of power
+  used for private advantage, not mere delay — it is graver than the
+  `doGovernanceReview` neglect channel's passive "too much time has passed"
+  reading of the same debt, and unlike that channel it is not gated on the
+  longer `environmentLandExecutorNeglectGraceTimesteps` window.
+  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes). The partiality grievance is Sect. 199: the executor exercising its enforcement power "to his own private separate advantage" — the same citation already grounding `"proportional"` redistribution's wrong in `runLevyPass`, feeding the same rebellion pathway (Sect. 240) rather than a new one. Penalizing every currently-neglected member per occurrence, rather than a single representative case, is a design choice.*
 - **`doTrustAccrual(self)`** (`793-806`) — Runs every timestep for every
   cell the agent owns; every neighbor of that cell who is alive, not a
   co-owner, and didn't trespass on it *this* timestep earns one trust point
@@ -157,10 +172,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `other` is in a government, `self` joins it (`addToGovernment`) on its own
   consent alone. Otherwise, only if `other`'s trust toward `self` has also
   crossed `other`'s threshold, founds a new government — a bare `set()` — and
-  votes **four** laws over the founders: `voteReparationRate` (the reparation
+  votes **five** laws over the founders: `voteReparationRate` (the reparation
   multiplier), `voteLandUse` (closed, or a per-harvest toll price),
   `voteRedistribution` (equal/proportional), `voteExecutor` (who collects on
-  the society's behalf). Zeros
+  the society's behalf), `votePayFraction` (what the executor(s) are paid
+  from the levy). Zeros
   both founders' `grievance` and `executorGrievance`.
   *Locke, Sect. 95-99 grounds forming political society by mutual consent — "when any number of men have so consented to make one community or government, they are thereby presently incorporated" — and is why a government is a bare `set()`, not a class: nothing more than its members' collected consent. Sect. 99 grounds the bilateral requirement for **founding** (each founder consents); Sect. 89 grounds **joining** an existing body on the joiner's consent alone ("men being... by nature all free, equal, and independent, no one can be... subjected to the political power of another, without his own consent"). The one-government-at-a-time rule is a design choice — Sect. 121 is about a tacit consenter's freedom to leave versus an express consenter's binding, not about exclusivity.*
 - **`voteReparationRate(self, founders)`** (`892-906`) — Each founder's
@@ -196,25 +212,41 @@ government commit `9a70cff`); for that commit's original per-method citations se
   (`addToGovernment`, `doInheritance`) or grievance forces a review — the one
   law that reconvenes the legislative (Sect. 153).
   *Locke, Sect. 138/139: "the supreme power cannot take from any man any part of his property without his own consent" — the levy is exactly that, a taking the aggrieved minority did not consent to. `"equal"` returns each member its own levy (the power held, not abused); `"proportional"` moves value from the land-poor to the land-rich — Sect. 199, power "to his own private separate advantage." So this is Lockean not as legitimate legislation (Sect. 140 taxation funds operations; this funds nothing) but as the wrong of Sect. 222 ("they endeavour to take away, and destroy the property of the people"), which forfeits trust and licenses withdrawal (Sect. 240). The mean-relative vote and the whole levy amount are design choices.*
-- **`voteExecutor(self, members)`** (`880-884`) — The fourth founding law
-  (Sect. 126). Preference does **not** track landholding — §126's defect is
+- **`voteExecutor(self, members)`** (`960-964`) — The fourth of five founding
+  laws (Sect. 126). Preference does **not** track landholding — §126's defect is
   inability to *reach* the transgressor, so the pick is the top
   `environmentLandExecutorCount` members (clamped to at least 1, at most
   `len(members)`) ranked by reach = `findVision() + findMovement()`, ties
   broken by lowest ID, returned as a `frozenset`. Because reach is an
   objective shared fact the ballot is degenerate (every member ranks the
   same members in the same order) and it reduces to an arg-top-N — kept in
-  vote form for parity with the other three, noted here. At the default
+  vote form for parity with the others, noted here. At the default
   count of `1` this is exactly the single-executor argmax the mechanic
   originally shipped with.
   *Locke, Sect. 126 grounds the appointment (the state of nature "wants power... to give [the sentence] due execution"). Sect. 152 grounds its being an office, replaceable "at pleasure", not a right — hence the deterministic tie-break rather than a natural entitlement. The vision+movement metric is a design choice standing in for "capacity to execute a judgment on a distant party." Sect. 126 establishes that an executive power must exist, not how many people hold it — the count itself is a design choice, hence configurable.*
-- **`addToGovernment(self, government, newMember)`** (`947-971`) — Adds
+- **`votePayFraction(self, members, executor)`** (`980-985`) — The fifth
+  founding law: how much of the levy pool the executor(s) are paid, one
+  entry from `environmentLandExecutorPayChoices`. Unlike the other menu
+  votes (`voteReparationRate`/`voteLandUse`), preference here isn't
+  stake-scaled — it's purely role-based: a member currently *in* `executor`
+  prefers the highest choice on the menu, everyone else prefers the lowest.
+  The government adopts the median (lower of the two middle choices on a
+  tie), matching every other vote's tie-break direction. Because preference
+  depends entirely on executor membership, outcomes are majority-driven by
+  government *size*: with `environmentLandExecutorCount` fixed, a small
+  government (executors are a majority of it) votes high pay; a large one
+  (executors are a minority) votes low; an exact tie favors low. `executor`
+  is passed in explicitly rather than read from `self.locke` because at
+  founding it isn't stored on the founders yet when this vote runs.
+  *Sect. 140: "it is fit every one who enjoys his share of the protection, should pay out of his estate his proportion for the maintenance of it" — a purpose (funding the Sect. 126 office) and majority consent (the vote itself) make this legitimate taxation, unlike the ordinary levy. But Locke never discusses executive compensation, and gives no basis for who should prefer what rate — the role-based preference rule (executor wants more, everyone else wants less) is this codebase's own construction, not textual, placed here as underdetermined. Executors voting themselves a raise is Sect. 199's "private separate advantage" in the most literal form the model has; whether that's an abuse depends on where the outcome lands relative to `environmentLandExecutorMaintenanceFraction` (see `runLevyPass` below).*
+- **`addToGovernment(self, government, newMember)`** (`924-941`) — Adds
   `newMember` to the shared `set()`, points their `locke["government"]` at it,
   copies the standing `governmentRate` / `governmentLandUse` /
-  `governmentRedistribution` / `governmentExecutor` onto them, zeros their
-  `grievance` and `executorGrievance`, then calls `reviewRedistribution` **and**
-  `reviewExecutor` — a changed roster is an occasion for the legislative to
-  re-vote both of those (Sect. 153). Rate and land-use are not re-legislated.
+  `governmentRedistribution` / `governmentExecutor` / `governmentExecutorPay`
+  onto them, zeros their `grievance` and `executorGrievance`, then calls
+  `reviewRedistribution`, `reviewExecutor`, **and** `reviewExecutorPay` — a
+  changed roster is an occasion for the legislative to re-vote all three
+  (Sect. 153). Rate and land-use are not re-legislated.
   *Locke, Sect. 97 grounds binding the joiner to the standing laws without a re-founding: consenting to incorporate "puts himself under an obligation... to submit to the determination of the majority." (Not Sect. 122 — that is about tacit compliance not conferring membership.)*
 - **`reviewRedistribution(self, government)`** (`973-988`) — Re-runs only
   `voteRedistribution` over the current roster; if the rule changed, writes it
@@ -234,28 +266,60 @@ government commit `9a70cff`); for that commit's original per-method citations se
   inertness is itself the Sect. 126 finding: a magistracy with no power to
   reach the debtor is the very defect it was appointed to cure.
   *Locke, Sect. 152: the executive is "accountable to [the legislative], and may at pleasure be changed and displaced"; Sect. 153: the legislative resumes power "to punish for any maladministration against the laws."*
+- **`votePayFraction(self, members, executor)` (`980-985`) /
+  `reviewExecutorPay(self, government)` (`987-999`)** —
+  `reviewExecutorPay` mirrors `reviewExecutor`'s structure
+  exactly (same `len(members) < 2` guard, same re-vote-and-compare-and-write
+  pattern) and is called at every occasion `reviewExecutor` is — roster
+  change (`addToGovernment`, `doInheritance`), post-withdrawal replacement,
+  and the executor-grievance-threshold review — because executor identity is
+  what `votePayFraction`'s preference depends on, so any event that can
+  change the executor set (or the government's size, which shifts whether
+  executors are a majority) is also an occasion to re-vote pay. It runs
+  unconditionally alongside `reviewExecutor` at each of those sites, not
+  only when `reviewExecutor` itself reports a change — a government that
+  shrinks from 4 to 3 members without an executor turnover still flips the
+  executors from a tie to a majority, and the pay vote needs the chance to
+  respond to that.
+  *Design choice — pure call-sequencing, matching the existing `reviewRedistribution`/`reviewExecutor` pairing at every one of those sites; no distinct textual content beyond what `votePayFraction` and `attemptGovernmentFormation` already ground.*
 - **`territoryGovernmentFor(self, cell)`** (`965-975`) — Returns the `set()`
   government of the first living owner of `cell` that belongs to one, else
   `None`. Derived, not stored — territory moves as claims are made and decay.
   *Locke, Sect. 119: the dominion is the members' land.*
-- **`dissolveGovernmentIfUnviable(self, government)`** (`1009-1026`) — If fewer
+- **`dissolveGovernmentIfUnviable(self, government)`** (`1109-1122`) — If fewer
   than two members remain, nulls every survivor's
-  `government`/`governmentRate`/`governmentLandUse`/`governmentRedistribution`/`governmentExecutor`,
+  `government`/`governmentRate`/`governmentLandUse`/`governmentRedistribution`/`governmentExecutor`/`governmentExecutorPay`,
   zeros their `grievance` and `executorGrievance`, clears the set. Trust scores
   persist. Called from `doInheritance` (death) and `doGovernanceReview`
   (withdrawal).
   *Locke, Sect. 211: a society dissolves when the body "can no longer act as one"; a single member is not a body. The survivor "returning to the state of nature" with its trust intact matches Sect. 211's sequel — dissolved members "are at liberty... by erecting a new legislative."*
-- **`runLevyPass(self, government)`** (`992-1024`) — Once per timestep per
+- **`runLevyPass(self, government)`** (`1006-1042`) — Once per timestep per
   government (the `lastLevyTimestep` guard makes later members skip; the roster
   is snapshotted so shuffled run-order and any same-timestep withdrawal do not
   change the denominator). Levies a flat per-capita
   `environmentLandLevyFraction * mean(lastHarvest)` from every member (sugar
-  first, then spice, capped at what it holds); redistributes the pool the same
-  timestep — `"equal"`: each gets its own levy back (net-zero); `"proportional"`:
-  each gets `pool * (its claims / total claims)`. Then
-  `grievance = max(0.0, grievance - net)` per member.
-  *Sect. 138 (the taking); Sect. 199 (the `"proportional"` concentration). The flat per-capita basis is chosen so `"proportional"` concentrates toward the land-rich by construction, independent of any harvest/claims correlation. Net-zero at the body level; a persistent common fund is out of scope.*
-- **`doGovernanceReview(self)`** (`1073-1131`) — Called from `doTrading`. First,
+  first, then spice, capped at what it holds) into a pool. First, the
+  government's voted `governmentExecutorPay` fraction of the pool is paid
+  directly to its executor(s), split evenly among them, and removed from the
+  pool. The remainder is redistributed the same timestep — `"equal"`: each
+  gets its own levy back scaled down by the same fraction the pool shrank by
+  (so a `governmentExecutorPay` deduction, applied uniformly, stays net-zero
+  on its own); `"proportional"`: each gets `remainingPool * (its claims /
+  total claims)`. Then
+  `grievance = max(0.0, grievance - (received - fairBaseline))` per member,
+  where `fairBaseline` is what an `"equal"` split of the *post-pay*
+  pool would have given that member — at `governmentExecutorPay = 0` this is
+  exactly the original formula (`fairBaseline == paid[member]`), verified to
+  reproduce the pre-existing numbers unchanged. **Separately**, whatever
+  `governmentExecutorPay` exceeds `environmentLandExecutorMaintenanceFraction`
+  is charged again as `excess`, and every member's `grievance` (executors
+  included) increases by `excess * (its own contribution / pool)` — this is
+  additive on top of the redistribution-fairness adjustment above, not a
+  replacement for it, and applies whether or not the pay fraction the
+  government is currently running was voted by a majority that benefits from
+  it. At or below the maintenance line, `excess` is `0` and nothing accrues.
+  *Sect. 138 (the taking); Sect. 199 (the `"proportional"` concentration). The flat per-capita basis is chosen so `"proportional"` concentrates toward the land-rich by construction, independent of any harvest/claims correlation. Net-zero at the body level for the redistributed remainder; a persistent common fund beyond the executor's cut is out of scope. The executor-pay cut itself is Sect. 140 up to the maintenance line: "it is fit every one who enjoys his share of the protection, should pay out of his estate his proportion for the maintenance of it" — a purpose (funding the Sect. 126 office) and majority consent (`votePayFraction`), unlike the ordinary levy which funds nothing and is Lockean only as the Sect. 222 wrong. Past that line the same payment stops being maintenance and becomes Sect. 138's "any part of his property without his own consent" again — consent from a self-interested majority (see `votePayFraction`) is not the "indifferent judge" Sect. 125 would require to make an above-maintenance rate legitimate merely because it was voted. `environmentLandExecutorMaintenanceFraction` and the excess formula's linearity are design choices — Locke draws the maintenance/taking line qualitatively, not numerically.*
+- **`doGovernanceReview(self)`** (`1063-1101`) — Called from `doTrading`. First,
   the **executor-neglect channel**: a non-executor member counts its own debts
   that ripened (`createdTimestep + collectionGrace`) at least
   `environmentLandExecutorNeglectGraceTimesteps` ago and whose debtor is alive
@@ -265,12 +329,15 @@ government commit `9a70cff`); for that commit's original per-method citations se
   Then the levy pass; if this member's `grievance` exceeds
   `environmentLandGrievanceThreshold` it **withdraws** (§240) — leaves the set,
   nulls its government fields, zeros both grievances, then
-  `dissolveGovernmentIfUnviable`, then `reviewExecutor` if the body survives (a
-  withdrawing executor must be replaced). Else: if summed `grievance` exceeds
-  `environmentLandGovernmentReviewThreshold`, `reviewRedistribution` (decay on a
-  change); and if summed `executorGrievance` exceeds
-  `environmentLandExecutorReviewThreshold`, `reviewExecutor` (zero everyone's
-  `executorGrievance` on a change).
+  `dissolveGovernmentIfUnviable`, then `reviewExecutor` **and**
+  `reviewExecutorPay` if the body survives (a withdrawing executor must be
+  replaced, and a smaller body can flip the pay vote's majority). Else: if
+  summed `grievance` exceeds `environmentLandGovernmentReviewThreshold`,
+  `reviewRedistribution` (decay on a change); and if summed `executorGrievance`
+  exceeds `environmentLandExecutorReviewThreshold`, `reviewExecutor` (zero
+  everyone's `executorGrievance` on a change) followed unconditionally by
+  `reviewExecutorPay` — pay is re-voted whenever executor is reconsidered, not
+  only when the executor set actually changes.
   *Locke, Sect. 240 ("the people shall be judge" of whether the legislature has broken trust) — each member judging its own government; Sect. 225 ("a long train of abuses") — cumulative, not one bad law. Sect. 156/152 ground the second channel: the executor holds "a fiduciary trust... for the safety of the people" and is displaced by the legislative for maladministration — but replacement, not dissolution, and only if there is a better candidate. This is **not** Sect. 125's "known and indifferent judge": self-judgment is what Sect. 125 identifies as the problem. Sect. 125 stays unaddressed — the model has no contested facts, only transparent transfers.*
 - **`resetTrustIn(self, violator)`** (`1054-1058`) — Zeroes
   `self.locke["trust"][violator.ID]` if nonzero. Called on the Locke agents
@@ -286,29 +353,51 @@ government commit `9a70cff`); for that commit's original per-method citations se
   accrual, and `doGovernanceReview` (executor neglect + levy + withdrawal +
   re-legislation + executor replacement).
   *Design choice — pure call-sequencing wrapper.*
-- **`findBestEthicalCell(self, cells, greedyBestCell=None)`** (`863-876`) —
-  Override of the base movement-decision hook; scores every candidate cell
-  via `findEthicalValueOfCell` and picks the highest-scoring one. This is
-  what actually decides where a `Locke` agent moves each timestep.
+- **`findBestEthicalCell(self, cells, greedyBestCell=None)`** (`578-586`) —
+  Override of the base movement-decision hook; computes
+  `findEnforcementTarget` once for the whole decision, scores every
+  candidate cell via `findEthicalValueOfCell` (passing that target along),
+  and picks the highest-scoring one. This is what actually decides where a
+  `Locke` agent moves each timestep.
   *Design choice — generic movement-selection architecture shared by every decision model in the codebase, not Locke-specific content.*
-- **`findEthicalValueOfCell(self, cell)`** (`1027-1033`) — Computes a cell's
-  attractiveness for the movement decision as `sugar + spice`, forced to `0`
-  when the cell is owned by another living agent — and, if
-  `self.locke["restrained"]` is set, to
+- **`findEnforcementTarget(self)`** (`588-601`) — Returns `None` unless
+  `self` is currently one of its government's executors. Otherwise,
+  collects every debt receivable held by any government member
+  (its own and every fellow member's — an executor may be entitled to
+  collect any of them) that is already collectible (aged past
+  `environmentLandForcefulCollectionGraceTimesteps`, debtor alive and
+  solvent), and returns the debtor on the single **oldest** such debt —
+  the most overdue case, regardless of distance. Non-executors and
+  executors with nothing collectible get `None` (no pursuit bias).
+  *Design choice — which of possibly several outstanding debts to chase (oldest, not nearest) is invented; Sect. 126 establishes only that an executive power to reach transgressors must exist, not a prioritization rule among several.*
+- **`findEthicalValueOfCell(self, cell, pursuitTarget=None)`** (`603-614`) —
+  Computes a cell's attractiveness for the movement decision as
+  `sugar + spice`, forced to `0` when the cell is owned by another living
+  agent — and, if `self.locke["restrained"]` is set, to
   `-(sugar + spice) - 1` (negative, richer claims avoided harder). A Locke
   agent places no value on entering foreign land; a restrained one scores it
   below its own worst legitimate option. An owner on their own cell is
-  unaffected either way.
-  *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" — exclusion is the primary effect of property. Hard exclusion in the movement score, not a tunable discount; an unrestrained Locke agent still trespasses when every reachable cell scores 0 (boxed in by claims), and non-`Locke` agents (which never run this method) trespass freely — so the trespass → debt → reparation machinery stays exercised. Sect. 12: punishment serves "reparation and restraint" — the negative score is the restraint half, driving a previously-collected-from agent to enter claimed land only when literally every reachable cell belongs to someone else. Restricted to Locke agents (only they carry the flag); implemented for completeness — in practice Locke agents rarely trespass under hard exclusion, so it seldom fires. The exclusion is flat across agents — Sect. 27 excludes everyone's common right equally, not weighted by trust or shared government.*
+  unaffected either way. Then, if `findBestEthicalCell` passed a
+  `pursuitTarget` (only ever non-`None` for an executor with something
+  collectible), subtracts `environmentLandExecutorPursuitWeight *`
+  Manhattan distance from the candidate cell to the target's *current* cell
+  — cells closer to the debtor score relatively higher, biasing movement
+  toward it without special-casing or overriding the exclusion/restraint
+  logic above (a foreign cell that happens to be closest to the target is
+  still `0` or negative before the pursuit term applies). The executor uses
+  the debtor's exact current position, not a sensed/inferred one.
+  *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" — exclusion is the primary effect of property. Hard exclusion in the movement score, not a tunable discount; an unrestrained Locke agent still trespasses when every reachable cell scores 0 (boxed in by claims), and non-`Locke` agents (which never run this method) trespass freely — so the trespass → debt → reparation machinery stays exercised. Sect. 12: punishment serves "reparation and restraint" — the negative score is the restraint half, driving a previously-collected-from agent to enter claimed land only when literally every reachable cell belongs to someone else. Restricted to Locke agents (only they carry the flag); implemented for completeness — in practice Locke agents rarely trespass under hard exclusion, so it seldom fires. The exclusion is flat across agents — Sect. 27 excludes everyone's common right equally, not weighted by trust or shared government. The pursuit bias is Sect. 126's "power... to give [the sentence] due execution" made into an actual cost the executor bears (worse foraging while it chases) instead of a stipulated one — the weight, the Manhattan metric, and full-information debtor tracking (no fog-of-war exists anywhere else in the model either) are design choices.*
 - **`doInheritance(self)`** (`1140-1179`) — Runs the base wealth-inheritance
   mechanic first, then splits/forfeits the deceased's land shares (Locke
   children co-own; otherwise the share reverts). Discharges the deceased's
   debts/receivables, calls `government.discard(self)`, then
   `dissolveGovernmentIfUnviable`, and — if the body still has two or more
-  members — `reviewRedistribution` **and** `reviewExecutor` over the survivors
-  (a death changes the roster — an occasion for the legislative, Sect. 153; and
-  the executor may have been the one who died, Sect. 152). Trust scores are left
-  intact.
+  members — `reviewRedistribution`, `reviewExecutor`, **and**
+  `reviewExecutorPay` over the survivors (a death changes the roster — an
+  occasion for the legislative, Sect. 153; the executor may have been the
+  one who died, Sect. 152; and a smaller surviving body can shift the
+  executor-pay vote's majority even without an executor turnover). Trust
+  scores are left intact.
   *Locke, Sect. 72 grounds the land-splitting half ("in certain proportions, according to the law and custom of each country" — the equal split is within that space). Sect. 211 grounds the dissolution (see `dissolveGovernmentIfUnviable`). The debt-discharge half is a plain design choice — Chapter V does not say whether a reparation debt survives a party's death.*
 - **`updateValues(self)`** (`1138-1142`) — Per-timestep hook that triggers
   `processLandAbandonment` and `settleDebtsVoluntarily`.
@@ -372,8 +461,12 @@ government commit `9a70cff`); for that commit's original per-method citations se
 - **Default configuration dict** (`~1914-1928`) — Adds, as hardcoded defaults:
   `"environmentLandDecayTimesteps": 50`,
   `"environmentLandExecutorCount": 1`,
+  `"environmentLandExecutorMaintenanceFraction": 0.2`,
   `"environmentLandExecutorNeglectGraceTimesteps": 5`,
   `"environmentLandExecutorNeglectPenalty": 0.5`,
+  `"environmentLandExecutorPartialityPenalty": 0.5`,
+  `"environmentLandExecutorPayChoices": [0.0, 0.1, 0.2, 0.4, 0.7]`,
+  `"environmentLandExecutorPursuitWeight": 0.5`,
   `"environmentLandExecutorReviewThreshold": 15.0`,
   `"environmentLandForcefulCollectionGraceTimesteps": 1`,
   `"environmentLandGovernmentReviewThreshold": 10.0`,
@@ -435,13 +528,17 @@ government commit `9a70cff`); for that commit's original per-method citations se
 - **The governance tuning keys** —
   `environmentLandLevyFraction` (`0.9`), `environmentLandGrievanceThreshold`
   (`10.0`), `environmentLandGovernmentReviewThreshold` (`10.0`),
-  `environmentLandGrievanceDecay` (`0.5`), and the three executor keys
+  `environmentLandGrievanceDecay` (`0.5`), and the seven executor keys
+  `environmentLandExecutorMaintenanceFraction` (`0.2`),
   `environmentLandExecutorNeglectGraceTimesteps` (`5`),
   `environmentLandExecutorNeglectPenalty` (`0.5`),
+  `environmentLandExecutorPartialityPenalty` (`0.5`),
+  `environmentLandExecutorPayChoices` (`[0.0, 0.1, 0.2, 0.4, 0.7]`),
+  `environmentLandExecutorPursuitWeight` (`0.5`),
   `environmentLandExecutorReviewThreshold` (`15.0`); tuned against 250-step
   debug runs so that withdrawal (levy grievance) is a recurring minority event
   and executor replacement fires on roster churn — Sect. 225/230.
-  *Design choices (all the numbers); the mechanisms are Sect. 138/199 (levy), Sect. 240 (withdrawal), Sect. 126/152/156 (executor) — see `voteRedistribution` / `voteExecutor` / `doGovernanceReview` above.*
+  *Design choices (all the numbers); the mechanisms are Sect. 138/199/140 (levy and executor pay), Sect. 240/199 (withdrawal and partiality), Sect. 126/152/156 (executor) — see `voteRedistribution` / `voteExecutor` / `doGovernanceReview` / `runLevyPass` / `doForcefulDebtCollection` above.*
 - **`environmentLandTrustThresholdRange: [1, 1]`** (new key) — Overrides the
   code default `[4, 8]` down for this scenario, so trust accrues fast and
   governments grow to many members — which the redistribution/rebellion
@@ -554,6 +651,16 @@ government commit `9a70cff`); for that commit's original per-method citations se
   debt ripens), the per-debt-per-timestep grievance, and the summed threshold
   that reconvenes the government to re-vote its executor; all Locke-only.
   *Design choice — documentation; see `voteExecutor` / `reviewExecutor` above.*
+- **`environmentLandExecutorPartialityPenalty` / `environmentLandExecutorPursuitWeight`
+  entries** (new) — Document the partiality grievance (fed into ordinary
+  `grievance`, distinct from `executorGrievance`) and the movement-scoring
+  pursuit weight; both Locke-only.
+  *Design choice — documentation; see `doForcefulDebtCollection` / `findEthicalValueOfCell` above.*
+- **`environmentLandExecutorPayChoices` / `environmentLandExecutorMaintenanceFraction`
+  entries** (new) — Document the executor-pay menu now voted via
+  `votePayFraction`/`governmentExecutorPay`, and the maintenance ceiling
+  above which the excess accrues grievance in `runLevyPass`; both Locke-only.
+  *Design choice — documentation; see `votePayFraction` / `runLevyPass` above.*
 - **`environmentLandReparationRateChoices` / `environmentLandReparationStakeReference`
   entries** (new) — Document the reparation-rate menu, the founding vote, the
   lone-owner floor, and the stake reference (also reused by the land-use vote);
