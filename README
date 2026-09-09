@@ -160,7 +160,7 @@ agentDecisionModels: [string, ...]
     Options: "altruist", "asimov", "bentham", "egoist", "locke", "negativeBentham", "none", "rawSugarscape", "temperance", "temperancePECS"
     Note: Adding either "HalfLookahead" or "NoLookahead" after some decision model names will enforce a particular decision model lookahead factor.
     Note: Adding "Dynamic" after some decision model names enforces dynamic selfishness.
-    Note: Trespass detection for land claimed under the "locke" decision model fires against any agent that harvests it, regardless of that agent's own decision model.
+    Note: Trespass detection for land claimed under the "locke" decision model only fires against a harvester that is itself a "locke" agent; other decision models can harvest claimed land without consequence.
     Default: ["none"]
 
 agentDecisionModelRacismFactor: [float, float]
