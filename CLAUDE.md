@@ -67,7 +67,14 @@ class; a government is a bare `set()` of member agents).
   and single-signal**: each mode fully replaces the cell colour, no blending with
   the sugar/spice gradient, no two signals on one cell. Per-owner blending and a
   Property+Government overlay were both built and reverted. New *peer* modes
-  (e.g. "Territory", "Executor") are fine; overlays are not. Locke state is read
+  (e.g. "Branches") are fine; overlays are not. A "Territory" environment
+  mode (claimed land colored by owning government) was added and then
+  removed by request; "Government"/"Branches" (agent modes) and
+  `findGovernmentColor` are unaffected. "Branches"
+  (agent mode, renamed from "Executor") uses one flat tone per branch of a
+  Locke government an agent holds — executor gold, legislature pale green,
+  ordinary member teal, non-member gray — checked in that priority order
+  since an executor is often also a legislature member. Locke state is read
   duck-typed (`getattr(agent, "locke", None)`), `gui.py` does not import `ethics`.
 
 ### Recurring patterns
