@@ -39,7 +39,7 @@ class; a government is a bare `set()` of member agents).
   via `getattr(x, "locke", None)` since `agent.py` cannot import `ethics.py`),
   `collectResourcesAtCell` (records `lastHarvest`, gates claim creation on a
   non-zero harvest), and `doTimestep` itself, which calls two no-op hooks —
-  `doDecisionModelTimestep()` right after `doTrading()`, `doDecisionModelCleanup()`
+  `doGovernment()` right after `doTrading()`, `doProperty()`
   right after `updateValues()`, same gating as those calls — so a decision
   model with extra per-timestep behavior that isn't trading or value-updating
   (Locke's land/government/debt machinery) doesn't have to override
@@ -230,8 +230,8 @@ class; a government is a bare `set()` of member agents).
   addition on top of the combined-verification fixes above, not
   re-verified together with them in one run.
 - **Refactored: `Locke` no longer overrides `doTrading`/`updateValues`.**
-  Replaced with `agent.py`-level no-op hooks `doDecisionModelTimestep`/
-  `doDecisionModelCleanup`, called at the same points under the same
+  Replaced with `agent.py`-level no-op hooks `doGovernment`/
+  `doProperty`, called at the same points under the same
   death-gating; `Locke` overrides the hooks instead, with the exact same
   method calls in the exact same order. Every other decision model
   inherits the no-op unchanged. Verified via a deterministic scratch test

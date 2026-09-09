@@ -567,13 +567,13 @@ class Locke(agent.Agent):
     def spawnChild(self, childID, birthday, cell, configuration):
         return Locke(childID, birthday, cell, configuration)
 
-    def doDecisionModelTimestep(self):
+    def doGovernment(self):
         self.doForcefulDebtCollection()
         self.doTrustAccrual()
         self.doLandConsentGrants()
         self.doGovernanceReview()
 
-    def doDecisionModelCleanup(self):
+    def doProperty(self):
         self.processLandAbandonment()
         self.settleDebtsVoluntarily()
 
