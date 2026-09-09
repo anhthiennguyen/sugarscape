@@ -33,12 +33,18 @@ class; a government is a bare `set()` of member agents).
 ## Architecture
 
 - `ethics.py` `class Locke` (~`552`–end) — everything Locke.
-- `agent.py` — base `Agent`. Two methods carry Locke-relevant logic because any
-  decision model can trespass: `recordLandTrespassIfOwned` (trespass detection,
-  witness trust reset, territory-toll interception — all duck-typed via
-  `getattr(x, "locke", None)` since `agent.py` cannot import `ethics.py`) and
+- `agent.py` — base `Agent`. Three methods carry Locke-relevant logic because
+  any decision model can trespass: `recordLandTrespassIfOwned` (trespass
+  detection, witness trust reset, territory-toll interception — all duck-typed
+  via `getattr(x, "locke", None)` since `agent.py` cannot import `ethics.py`),
   `collectResourcesAtCell` (records `lastHarvest`, gates claim creation on a
-  non-zero harvest).
+  non-zero harvest), and `doTimestep` itself, which calls two no-op hooks —
+  `doDecisionModelTimestep()` right after `doTrading()`, `doDecisionModelCleanup()`
+  right after `updateValues()`, same gating as those calls — so a decision
+  model with extra per-timestep behavior that isn't trading or value-updating
+  (Locke's land/government/debt machinery) doesn't have to override
+  `doTrading`/`updateValues` themselves. Only `Locke` overrides the hooks; every
+  other decision model inherits the no-op unchanged.
 - `PROPERTY.md` — the citation-honesty reference. Line numbers drift; keep the
   ones for entries you rewrite accurate, don't chase the rest.
 - `README`, `config.json`, `sugarscape.py`, `examples/locke_basic.json` — see
@@ -223,6 +229,33 @@ class; a government is a bare `set()` of member agents).
   trespass debt during the population's fragile early window. Kept as an
   addition on top of the combined-verification fixes above, not
   re-verified together with them in one run.
+- **Refactored: `Locke` no longer overrides `doTrading`/`updateValues`.**
+  Replaced with `agent.py`-level no-op hooks `doDecisionModelTimestep`/
+  `doDecisionModelCleanup`, called at the same points under the same
+  death-gating; `Locke` overrides the hooks instead, with the exact same
+  method calls in the exact same order. Every other decision model
+  inherits the no-op unchanged. Verified via a deterministic scratch test
+  of call order/gating (not seed comparison — see next bullet for why)
+  plus a 25-seed extinction-rate check (7-8/25 extinct across two
+  identical-code reruns vs. 10/25 post-refactor — within the noise
+  established by the identical-code reruns themselves) and the full
+  29-config smoke suite.
+- **Important methodological finding: single-seed population comparison
+  is not a valid verification technique on this branch.** Rerunning
+  byte-identical code, same seed, same config, in a fresh process was
+  found to produce different final populations and even different
+  survive/extinct outcomes for the *same* seed (e.g. one run extinct,
+  an immediate rerun of the identical code `pop=887`). Root cause: a
+  government is a bare `set()` of member agents (see "Single class"
+  above); Python's default object hash is identity/address-based, so a
+  `set`'s iteration order isn't reproducible across process runs even
+  under a fixed `random.seed()` (`PYTHONHASHSEED` doesn't fix this — it
+  only governs `str`/`bytes` hashing). This predates and is unrelated to
+  any change made this session; it just means **only aggregate stats
+  across a seed sample** (extinction rate, median population) are a
+  sound basis for comparing two versions of the code — never a single
+  seed's exact outcome, and even aggregate stats need a same-code
+  rerun as a noise baseline before trusting a small observed gap.
 
 ## Config plumbing (load-bearing gotcha)
 

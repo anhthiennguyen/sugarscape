@@ -623,6 +623,7 @@ class Agent:
                 return
             self.doTagging()
             self.doTrading()
+            self.doDecisionModelTimestep()
             self.doReproduction()
             self.doLending()
             # End of timestep actions
@@ -635,6 +636,13 @@ class Agent:
             self.updateHappiness()
             self.updateRuntimeStats()
             self.updateValues()
+            self.doDecisionModelCleanup()
+
+    def doDecisionModelTimestep(self):
+        pass
+
+    def doDecisionModelCleanup(self):
+        pass
 
     def doTrading(self):
         # If not a trader, skip trading

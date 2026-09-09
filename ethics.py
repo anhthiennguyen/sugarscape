@@ -564,20 +564,18 @@ class Locke(agent.Agent):
                        "governmentLegislature": None, "governmentLevyFraction": None,
                        "lastLegislativeReviewTimestep": None, "legislatureGrievance": 0.0}
 
-    def updateValues(self):
-        super().updateValues()
-        self.processLandAbandonment()
-        self.settleDebtsVoluntarily()
-
     def spawnChild(self, childID, birthday, cell, configuration):
         return Locke(childID, birthday, cell, configuration)
 
-    def doTrading(self):
-        super().doTrading()
+    def doDecisionModelTimestep(self):
         self.doForcefulDebtCollection()
         self.doTrustAccrual()
         self.doLandConsentGrants()
         self.doGovernanceReview()
+
+    def doDecisionModelCleanup(self):
+        self.processLandAbandonment()
+        self.settleDebtsVoluntarily()
 
     def findBestEthicalCell(self, cells, greedyBestCell=None):
         if len(cells) == 0:

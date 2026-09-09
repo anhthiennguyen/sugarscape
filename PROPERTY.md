@@ -174,8 +174,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   on an exhausted cell no longer holds the claim against `processLandAbandonment`.
   *Design choice — the specific "wait until the owner returns" timing is invented; the reparation right it triggers is grounded in Sect. 10, and the harvest gate in Sect. 38 (see `collectResourcesAtCell`). Consequence: pending violations on a claim the owner only ever revisits without gathering are not booked until someone next harvests the cell (still credited to the snapshotted victim via `convertViolationsToDebts`), or are lost if the claim decays first — consistent with an abandoning owner forfeiting the claim going forward.*
 - **`doLandConsentGrants(self)`** (`688-712`) — Runs every timestep (called
-  from `doTrading`, alongside the other per-timestep Locke passes) for
-  every claim `self` still holds. If less than half of
+  from `doDecisionModelTimestep`, alongside the other per-timestep Locke
+  passes) for every claim `self` still holds. If less than half of
   `environmentLandDecayTimesteps` has elapsed since the cell was last
   harvested, does nothing — the claim isn't at meaningful risk yet. Once
   it's past that halfway point, looks among `self`'s cell-adjacent
@@ -584,7 +584,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   by `excess * (its own contribution / pool)`; at or below the
   maintenance line, `excess` is `0` and nothing accrues.
   *Sect. 138 (the taking); Sect. 199 (the `"proportional"` concentration, and now the restricted-form exclusion itself — a legislature "having a distinct interest from the rest of the community" in its starkest form, keeping the whole pool while subjects are still taxed). The flat per-capita basis is chosen so `"proportional"` concentrates toward the land-rich by construction, independent of any harvest/claims correlation. The executor-pay cut itself is Sect. 140 up to the maintenance line: "it is fit every one who enjoys his share of the protection, should pay out of his estate his proportion for the maintenance of it" — a purpose (funding the Sect. 126 office) and majority consent (`votePayFraction`), unlike the ordinary levy which funds nothing and is Lockean only as the Sect. 222 wrong. Past that line the same payment stops being maintenance and becomes Sect. 138's "any part of his property without his own consent" again. `environmentLandExecutorMaintenanceFraction`, the excess formula's linearity, and the restricted-form payout split are design choices — Locke draws the relevant lines qualitatively, not numerically or mechanically.*
-- **`doGovernanceReview(self)`** (`1160-1223`) — Called from `doTrading`. First,
+- **`doGovernanceReview(self)`** (`1160-1223`) — Called from
+  `doDecisionModelTimestep`. First,
   the **executor-neglect channel**: a non-executor member counts its own
   debts whose debtor is alive and solvent — collectible starting the
   instant a debt exists, no grace period at all — and adds
@@ -641,13 +642,27 @@ government commit `9a70cff`); for that commit's original per-method citations se
   owner when the violation is booked as a debt (in `convertViolationsToDebts`).
   Not the whole population.
   *Locke, Sect. 94: people act on what they perceive — "it hinders not men from feeling... when they perceive, that any man... is out of the bounds of the civil society which they are of". Instant grid-wide knowledge of a transgression is not perception. An earlier Phase 2 version reset every living Locke agent's trust at once, citing Sect. 8 ("a trespass against the whole species") — but Sect. 8 establishes only that the wrong concerns everyone, not that everyone learns of it. Sect. 11 grounds the owner carve-out: the injured party has a particular standing and finds out when the debt lands on the ledger, wherever they were standing. Zeroing the score rather than decaying it is a design choice.*
-- **`doTrading(self)`** (`575-580`) — Override that runs the base agent's
-  ordinary trading first (`super().doTrading()`), then the land-specific
-  behaviours in order: forceful collection, trust
-  accrual, consent-based co-ownership grants (`doLandConsentGrants`), and
-  `doGovernanceReview` (executor neglect + levy + withdrawal +
-  re-legislation + executor replacement).
-  *Design choice — pure call-sequencing wrapper.*
+- **`doDecisionModelTimestep(self)`** (`570-574`) — Override of `agent.py`'s
+  no-op hook, called from `agent.Agent.doTimestep` at the same point (and
+  under the same gating — skipped exactly when the agent died to
+  metabolism this timestep) that the ordinary base `doTrading()` call
+  immediately precedes. Runs the land-specific per-timestep passes in
+  order: forceful collection, trust accrual, consent-based co-ownership
+  grants (`doLandConsentGrants`), and `doGovernanceReview` (executor
+  neglect + levy + withdrawal + re-legislation + executor replacement).
+  Locke no longer overrides `doTrading` itself — ordinary trading runs
+  unmodified via the base class, and this hook carries only the
+  land-specific behavior, since none of it is actually trading.
+  *Design choice — pure call-sequencing wrapper; the hook itself
+  (`doDecisionModelTimestep`/`doDecisionModelCleanup` in `agent.py`) is
+  likewise a design choice, not a Locke-specific citation, since it's
+  scaffolding shared by every decision model, not a Second Treatise
+  mechanic. Verified behavior-preserving against the prior
+  `doTrading`-override design via a deterministic scratch test of call
+  order and death-gating (single-seed population comparisons are not a
+  valid check here — see `doGovernanceReview`'s neighboring entries and
+  the note on `set()`-based nondeterminism in `agent.py`'s section
+  below).*
 - **`findBestEthicalCell(self, cells, greedyBestCell=None)`** (`578-586`) —
   Override of the base movement-decision hook; computes
   `findEnforcementTarget` once for the whole decision, scores every
@@ -752,9 +767,17 @@ government commit `9a70cff`); for that commit's original per-method citations se
   one member's death; only who currently holds it can change. Trust
   scores are left intact.
   *Locke, Sect. 72 grounds the land-splitting half ("in certain proportions, according to the law and custom of each country" — the equal split is within that space). Sect. 211 grounds the dissolution (see `dissolveGovernmentIfUnviable`). The debt-discharge half is a plain design choice — Chapter V does not say whether a reparation debt survives a party's death.*
-- **`updateValues(self)`** (`1138-1142`) — Per-timestep hook that triggers
-  `processLandAbandonment` and `settleDebtsVoluntarily`.
-  *Design choice — per-timestep orchestration hook.*
+- **`doDecisionModelCleanup(self)`** (`576-578`) — Override of `agent.py`'s
+  other no-op hook, called from `agent.Agent.doTimestep` immediately after
+  the base `updateValues()` call, under the same gating (skipped exactly
+  when the agent died to aging this timestep). Triggers
+  `processLandAbandonment` and `settleDebtsVoluntarily`. Locke no longer
+  overrides `updateValues` itself; the base implementation runs
+  unmodified and this hook carries only the land-specific end-of-timestep
+  cleanup.
+  *Design choice — per-timestep orchestration hook. See
+  `doDecisionModelTimestep`'s entry above for the equivalence argument and
+  verification method against the prior `updateValues`-override design.*
 - **`spawnChild(self, childID, birthday, cell, configuration)`**
   (`1143-1144`) — Returns a new `Locke` instance for reproduction, so a
   `Locke` agent's children are also `Locke` agents by default. This is what
@@ -766,6 +789,48 @@ government commit `9a70cff`); for that commit's original per-method citations se
 
 ## `agent.py` — `class Agent` (base class, only the touched methods)
 
+- **`doTimestep(self, timestep, predeterminedMove=None)`** — Two calls
+  added to the existing sequence: `self.doDecisionModelTimestep()`
+  immediately after `self.doTrading()` (same position, same gating — the
+  post-metabolism `if self.alive == False: return` above it — that
+  `doTrading()` itself sits behind), and `self.doDecisionModelCleanup()`
+  immediately after `self.updateValues()` at the very end (same gating —
+  the post-aging `return` above it — that `updateValues()` sits behind).
+  Added so a decision model with its own per-timestep or end-of-timestep
+  behavior that *isn't* trading or the base value-update logic (`Locke`'s
+  land/government/debt machinery being the only current example) doesn't
+  have to piggyback on an override of `doTrading`/`updateValues` whose
+  name no longer describes what it does.
+  *Design choice — pure call-sequencing scaffolding shared by every
+  decision model, not a Locke-specific or Second-Treatise mechanic.*
+- **`doDecisionModelTimestep(self)`** / **`doDecisionModelCleanup(self)`**
+  — No-op hooks (`pass`) called from the two new sites above. Every
+  non-`Locke` decision model (`Asimov`, `Bentham`, `Leader`, `Temperance`,
+  `"none"`) inherits the no-op and is behavior-unchanged; only `Locke`
+  overrides them (see `ethics.py`'s entries for `doDecisionModelTimestep`/
+  `doDecisionModelCleanup`, which replaced its prior `doTrading`/
+  `updateValues` overrides one-for-one).
+  *Design choice — scaffolding. Verified behavior-preserving for `Locke`
+  via a deterministic scratch test (fake-agent trace confirming the full
+  `doTimestep` call order and both death-gating branches — metabolism
+  death skips both hooks, aging death runs the timestep hook but skips
+  the cleanup hook — exactly match the prior override-based design) plus
+  a 25-seed extinction-rate comparison. Note on the seed comparison: a
+  **single-seed population-count comparison is not a valid check on this
+  codebase** — rerunning byte-identical code (same seed, same config, no
+  code change at all) in a fresh process was found to already produce
+  different final populations and even different survive/extinct
+  outcomes for the same seed (e.g. one seed extinct in one run, `pop=887`
+  in an immediate rerun of identical code). Root cause: a government is a
+  bare `set()` of member agents (see this file's header), and Python's
+  default object hash is identity/address-based, so a `set`'s iteration
+  order is not reproducible across process runs even under a fixed
+  `random.seed()` — `PYTHONHASHSEED` does not fix this, since it only
+  affects `str`/`bytes` hashing, not the id-based hash of arbitrary
+  objects. This is a pre-existing property of the simulation, not
+  something this refactor introduced, and means aggregate statistics
+  across a seed sample (extinction rate, not per-seed exact match) are
+  the only sound way to compare two versions of the code going forward.
 - **`collectResourcesAtCell(self)`** (`249-260`) — One line added:
   `self.recordLandTrespassIfOwned(sugarCollected, spiceCollected)`, inserted
   after pollution handling and before the cell's sugar/spice are reset. This
