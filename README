@@ -445,13 +445,8 @@ environmentLandExecutorMaintenanceFraction: float
     Note: Only relevant to the "locke" decision model.
     Default: 0.2
 
-environmentLandExecutorNeglectGraceTimesteps: int
-    Set the number of timesteps a ripened (already collectible) land debt owed to a Locke government member may go unenforced before it begins to count as executor neglect. The window is measured from when the debt became collectible, giving the appointed executor time to cross the map and reach the debtor.
-    Note: Only relevant to the "locke" decision model.
-    Default: 5
-
 environmentLandExecutorNeglectPenalty: float
-    Set the executor grievance a non-executor Locke government member accrues per timestep, per debt of its own that has gone unenforced past the neglect grace window.
+    Set the executor grievance a non-executor Locke government member accrues per timestep, per debt of its own that has gone unenforced - collectible, and countable, starting the very timestep it's created, since there is no grace period.
     Note: Only relevant to the "locke" decision model.
     Default: 0.5
 
@@ -466,14 +461,9 @@ environmentLandExecutorPayChoices: [float, ...]
     Default: [0.0, 0.1, 0.2, 0.4, 0.7]
 
 environmentLandExecutorPursuitWeight: float
-    Set the per-cell-of-distance penalty an executing Locke agent applies when scoring candidate cells during movement, biasing it toward whichever collectible unenforced debt (its own or a fellow government member's) is longest overdue. Enforcement cost is emergent: pursuing a debtor means passing up better foraging cells elsewhere.
+    Set the per-cell-of-distance penalty an executing Locke agent applies when scoring candidate cells during movement, biasing it toward whichever collectible unenforced debt (its own or a fellow government member's) is longest overdue. Enforcement cost is emergent: pursuing a debtor means passing up better foraging cells elsewhere. A land debt is collectible - by its creditor, by a recognized executor, or by a recognized fellow member assisting the executor - starting the very timestep it's created; there is no grace period.
     Note: Only relevant to the "locke" decision model.
     Default: 0.5
-
-environmentLandForcefulCollectionGraceTimesteps: int
-    Set the number of timesteps a land debt must age before a Locke agent may forcefully collect it from the debtor.
-    Note: Only relevant to the "locke" decision model.
-    Default: 1
 
 environmentLandGrievanceDecay: float
     Set the multiplier (0 to 1) applied to every member's grievance when a government re-legislates its redistribution rule in response to grievance.

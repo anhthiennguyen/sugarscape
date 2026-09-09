@@ -209,6 +209,20 @@ class; a government is a bare `set()` of member agents).
   consent grants were added afterward per direct request and verified
   together with everything else in this one run, not each in its own
   isolated ablation.
+- **Removed: the debt-collection grace period
+  (`environmentLandForcefulCollectionGraceTimesteps` /
+  `environmentLandExecutorNeglectGraceTimesteps`)** — both were already
+  documented as a pure, ungrounded design choice ("Locke specifies no
+  time period at all before force becomes legitimate"), so removing them
+  isn't a citation-honesty regression. A debt is now collectible,
+  pursuable (`findEnforcementTarget`), and countable as neglect
+  (`doGovernanceReview`) starting the instant it's created. A 20-seed
+  same-seed comparison found this measurably helps survival: 13/20 with
+  the grace windows vs. 16/20 without, at timestep 500 — faster,
+  more certain enforcement keeps less wealth tied up in unresolved
+  trespass debt during the population's fragile early window. Kept as an
+  addition on top of the combined-verification fixes above, not
+  re-verified together with them in one run.
 
 ## Config plumbing (load-bearing gotcha)
 

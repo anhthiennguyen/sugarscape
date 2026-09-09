@@ -229,10 +229,10 @@ government commit `9a70cff`); for that commit's original per-method citations se
   once fully paid. No proximity requirement.
   *Locke, Sect. 37: "the intrinsic value of things... depends only on their usefulness to the life of man," combined with Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life." Together these ground value as commensurable across different useful goods, but it's a stretched analogy: Locke's money is valuable specifically because it is NOT one of the perishable staples, whereas sugar and spice here are the staples themselves — the "same nominal value regardless of resource" rule has no tight single-passage match.*
 - **`doForcefulDebtCollection(self)`** (`766-813`) — Runs every timestep; for
-  every neighboring agent, for every debt that neighbor owes older than
-  `environmentLandForcefulCollectionGraceTimesteps`, seizes whatever
-  sugar/spice the debtor holds (capped at the debt) and pays it to the
-  creditor. The gate, in order: **`self` is the creditor** (ungated self-help);
+  every neighboring agent, for every debt that neighbor owes — collectible
+  starting the very timestep it's created, no grace period — seizes
+  whatever sugar/spice the debtor holds (capped at the debt) and pays it
+  to the creditor. The gate, in order: **`self` is the creditor** (ungated self-help);
   or **`self` is one of its government's `governmentExecutor` set and the
   creditor is a fellow member**; or — new — **`self` is a non-executor
   member, the creditor is a fellow member, the government has at least one
@@ -248,18 +248,31 @@ government commit `9a70cff`); for that commit's original per-method citations se
   once set, persists on the debt record until the debt is settled. When a
   seizure lands on a `Locke` debtor its `restrained` flag is set (Sect. 12).
   **Partiality**: immediately after any executor successfully seizes on its
-  *own* debt, it checks every other government member for a debt receivable
-  of their own that is already collectible (same grace window, alive and
-  solvent debtor) but hasn't been reached — for each such member found, it
+  *own* debt, it checks every other government member for a debt
+  receivable of their own that is already collectible (alive and solvent
+  debtor) but hasn't been reached — for each such member found, it
   accrues `environmentLandExecutorPartialityPenalty` to *that member's*
   ordinary `grievance` (the same field the levy's `"proportional"` wrong
   feeds, not `executorGrievance`, which is replacement-only). An executor
   serving itself while a fellow member visibly waits is evidence of power
   used for private advantage, not mere delay — it is graver than the
-  `doGovernanceReview` neglect channel's passive "too much time has passed"
-  reading of the same debt, and unlike that channel it is not gated on the
-  longer `environmentLandExecutorNeglectGraceTimesteps` window.
-  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes). The partiality grievance is Sect. 199: the executor exercising its enforcement power "to his own private separate advantage" — the same citation already grounding `"proportional"` redistribution's wrong in `runLevyPass`, feeding the same rebellion pathway (Sect. 240) rather than a new one. Penalizing every currently-neglected member per occurrence, rather than a single representative case, is a design choice.*
+  `doGovernanceReview` neglect channel's passive "hasn't reached it yet"
+  reading of the same debt, though both now use the identical, gate-free
+  collectibility test. **Fixed finding**: this and the two sites below
+  used to gate on `environmentLandForcefulCollectionGraceTimesteps` (and,
+  for the neglect channel specifically, an additional
+  `environmentLandExecutorNeglectGraceTimesteps` window on top) — a
+  minimum age a debt had to reach before any of this could fire at all.
+  Both keys were already documented as a pure, ungrounded design choice
+  (no textual basis for *any* waiting period). Removing them entirely — a
+  debt is now collectible, pursuable, and countable-as-neglected starting
+  the instant it exists — measurably improved survival on a 20-seed
+  sample of `config.json`'s pure-`"locke"` population: 13/20 survived
+  with the grace windows in place, 16/20 survived with them removed, at
+  timestep 500. Faster, more certain enforcement keeps less wealth tied
+  up in unresolved trespass debt during the population's fragile early
+  window.
+  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes). The partiality grievance is Sect. 199: the executor exercising its enforcement power "to his own private separate advantage" — the same citation already grounding `"proportional"` redistribution's wrong in `runLevyPass`, feeding the same rebellion pathway (Sect. 240) rather than a new one. Penalizing every currently-neglected member per occurrence, rather than a single representative case, is a design choice. No grace period gates any of this: Locke gives reparation no waiting period (Sect. 12/19), so instant enforcement is, if anything, the more literal reading, not a departure from one.*
 - **`doTrustAccrual(self)`** (`793-806`) — Runs every timestep for every
   cell the agent owns; every neighbor of that cell who is alive, not a
   co-owner, and didn't trespass on it *this* timestep earns one trust point
@@ -572,12 +585,13 @@ government commit `9a70cff`); for that commit's original per-method citations se
   maintenance line, `excess` is `0` and nothing accrues.
   *Sect. 138 (the taking); Sect. 199 (the `"proportional"` concentration, and now the restricted-form exclusion itself — a legislature "having a distinct interest from the rest of the community" in its starkest form, keeping the whole pool while subjects are still taxed). The flat per-capita basis is chosen so `"proportional"` concentrates toward the land-rich by construction, independent of any harvest/claims correlation. The executor-pay cut itself is Sect. 140 up to the maintenance line: "it is fit every one who enjoys his share of the protection, should pay out of his estate his proportion for the maintenance of it" — a purpose (funding the Sect. 126 office) and majority consent (`votePayFraction`), unlike the ordinary levy which funds nothing and is Lockean only as the Sect. 222 wrong. Past that line the same payment stops being maintenance and becomes Sect. 138's "any part of his property without his own consent" again. `environmentLandExecutorMaintenanceFraction`, the excess formula's linearity, and the restricted-form payout split are design choices — Locke draws the relevant lines qualitatively, not numerically or mechanically.*
 - **`doGovernanceReview(self)`** (`1160-1223`) — Called from `doTrading`. First,
-  the **executor-neglect channel**: a non-executor member counts its own debts
-  that ripened (`createdTimestep + collectionGrace`) at least
-  `environmentLandExecutorNeglectGraceTimesteps` ago and whose debtor is alive
-  and solvent, and adds `environmentLandExecutorNeglectPenalty` per such debt to
-  its `executorGrievance` (the earlier `doForcefulDebtCollection` already tried
-  the member's own reach, so anything still outstanding is genuinely beyond it).
+  the **executor-neglect channel**: a non-executor member counts its own
+  debts whose debtor is alive and solvent — collectible starting the
+  instant a debt exists, no grace period at all — and adds
+  `environmentLandExecutorNeglectPenalty` per such debt to its
+  `executorGrievance` (the earlier `doForcefulDebtCollection` already
+  tried the member's own reach, so anything still outstanding is
+  genuinely beyond it).
   Then the levy pass (which is also where `legislatureGrievance` accrues —
   see `runLevyPass`); if this member's `grievance` exceeds
   `environmentLandGrievanceThreshold` it **withdraws** (§240) — leaves the set,
@@ -641,16 +655,16 @@ government commit `9a70cff`); for that commit's original per-method citations se
   and picks the highest-scoring one. This is what actually decides where a
   `Locke` agent moves each timestep.
   *Design choice — generic movement-selection architecture shared by every decision model in the codebase, not Locke-specific content.*
-- **`findEnforcementTarget(self)`** (`588-601`) — Returns `None` unless
+- **`findEnforcementTarget(self)`** (`597-604`) — Returns `None` unless
   `self` is currently one of its government's executors. Otherwise,
   collects every debt receivable held by any government member
   (its own and every fellow member's — an executor may be entitled to
-  collect any of them) that is already collectible (aged past
-  `environmentLandForcefulCollectionGraceTimesteps`, debtor alive and
-  solvent), and returns the debtor on the single **oldest** such debt —
-  the most overdue case, regardless of distance. Non-executors and
-  executors with nothing collectible get `None` (no pursuit bias).
-  *Design choice — which of possibly several outstanding debts to chase (oldest, not nearest) is invented; Sect. 126 establishes only that an executive power to reach transgressors must exist, not a prioritization rule among several.*
+  collect any of them) that is collectible (debtor alive and solvent —
+  no grace period, a debt qualifies the instant it exists), and returns
+  the debtor on the single **oldest** such debt — the most overdue case,
+  regardless of distance. Non-executors and executors with nothing
+  collectible get `None` (no pursuit bias).
+  *Design choice — which of possibly several outstanding debts to chase (oldest, not nearest) is invented; Sect. 126 establishes only that an executive power to reach transgressors must exist, not a prioritization rule among several. No grace period is a design choice too, though the more literal one: Locke never describes reparation as needing to wait.*
 - **`isDesperate(self)`** (`612-613`) — Returns `True` if `self` would end
   this timestep with negative sugar or negative spice on its *current*
   holdings alone (`sugar - findSugarMetabolism() < 0`, or the spice
@@ -801,12 +815,10 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `"environmentLandDecayTimesteps": 50`,
   `"environmentLandExecutorCount": 1`,
   `"environmentLandExecutorMaintenanceFraction": 0.2`,
-  `"environmentLandExecutorNeglectGraceTimesteps": 5`,
   `"environmentLandExecutorNeglectPenalty": 0.5`,
   `"environmentLandExecutorPartialityPenalty": 0.5`,
   `"environmentLandExecutorPayChoices": [0.0, 0.1, 0.2, 0.4, 0.7]`,
   `"environmentLandExecutorPursuitWeight": 0.5`,
-  `"environmentLandForcefulCollectionGraceTimesteps": 1`,
   `"environmentLandGrievanceDecay": 0.5`,
   `"environmentLandGrievanceThreshold": 6.0`,
   `"environmentLandLegislativeReviewInterval": 10`,
@@ -824,7 +836,13 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `environmentLandLevyFractionChoices`), `environmentLandGovernmentReviewThreshold`,
   and `environmentLandExecutorReviewThreshold` (both threshold gates
   removed from `doGovernanceReview`, which now reviews every legislative
-  reconvening unconditionally — see that method's entry above).
+  reconvening unconditionally — see that method's entry above). A later
+  change removed two more: `environmentLandForcefulCollectionGraceTimesteps`
+  and `environmentLandExecutorNeglectGraceTimesteps` — debt collection has
+  no grace period at all now, a debt is collectible the instant it's
+  created (see `doForcefulDebtCollection`/`findEnforcementTarget`/
+  `doGovernanceReview` above), so there was nothing left for either key to
+  size.
   This is load-bearing: the config-file-override loop
   (`for opt in configuration: if opt in options: ...`) only applies a
   `config.json` value for a key that *already exists* in this dict — a key
@@ -858,9 +876,6 @@ government commit `9a70cff`); for that commit's original per-method citations se
 - **`environmentLandDecayTimesteps: 3`** (line `83`, new key) — Overrides
   the code default of `50` down to `3` for this scenario.
   *Design choice (numeric value); the underlying concept is grounded in Sect. 38 — see `forfeitCellClaim` above.*
-- **`environmentLandForcefulCollectionGraceTimesteps: 1`** (line `84`, new
-  key) — Matches the code default of `1`.
-  *Design choice — Locke specifies no time period at all before force becomes legitimate; see Sect. 12/19 under `doForcefulDebtCollection` above.*
 - **`environmentLandExecutorCount: 2`** (new key) — Overrides the code
   default of `1` up to `2`, so this scenario's governments elect two
   executors instead of one; with `environmentLandTrustThresholdRange: [1, 1]`
@@ -896,18 +911,19 @@ government commit `9a70cff`); for that commit's original per-method citations se
   reconvenings), `environmentLandLegislatureGrievancePenalty` (`0.5`) and
   `environmentLandLegislatureGrievanceThreshold` (`6.0`, both matching
   code defaults — the third grievance channel that can force an early
-  reconvening ahead of the interval), and the seven executor keys
+  reconvening ahead of the interval), and the six executor keys
   `environmentLandExecutorMaintenanceFraction` (`0.2`),
-  `environmentLandExecutorNeglectGraceTimesteps` (`5`),
   `environmentLandExecutorNeglectPenalty` (`0.5`),
   `environmentLandExecutorPartialityPenalty` (`0.5`),
   `environmentLandExecutorPayChoices` (`[0.0, 0.1, 0.2, 0.4, 0.7]`),
   `environmentLandExecutorPursuitWeight` (`0.5`); tuned against 250-step
   debug runs so that withdrawal (levy grievance) is a recurring minority event
   and executor replacement fires on roster churn — Sect. 225/230.
-  `environmentLandGovernmentReviewThreshold` and
-  `environmentLandExecutorReviewThreshold`, both previously listed here,
-  are gone along with the code defaults they overrode — see the
+  `environmentLandGovernmentReviewThreshold`,
+  `environmentLandExecutorReviewThreshold`,
+  `environmentLandForcefulCollectionGraceTimesteps`, and
+  `environmentLandExecutorNeglectGraceTimesteps`, all previously listed
+  here, are gone along with the code defaults they overrode — see the
   `sugarscape.py` entry above.
   *Design choices (all the numbers); the mechanisms are Sect. 138/199/140 (levy and executor pay), Sect. 240/199 (withdrawal and partiality), Sect. 126/152/156 (executor), Sect. 153 (the legislative-reconvening interval) — see `voteRedistribution` / `voteExecutor` / `doGovernanceReview` / `runLevyPass` / `doForcefulDebtCollection` / `voteLevyFraction` above.*
 - **`environmentLandTrustThresholdRange: [1, 1]`** (new key) — Overrides the
@@ -1007,25 +1023,23 @@ government commit `9a70cff`); for that commit's original per-method citations se
 - **`environmentLandDecayTimesteps` entry** (new) — Documents the decay
   config key, its Locke-only relevance, and its code default of `50`.
   *Design choice — documentation; concept grounded in Sect. 38, see `forfeitCellClaim` above.*
-- **`environmentLandForcefulCollectionGraceTimesteps` entry** (new) —
-  Documents the grace-period config key, its Locke-only relevance, and its
-  default of `1`.
-  *Design choice — documentation; see Sect. 12/19 under `doForcefulDebtCollection` above.*
 - **`environmentLandExecutorCount` entry** (new) — Documents the executor
   count, its clamping to `[1, len(members)]`, and that it generalizes the
   same vision+movement/lowest-ID selection the single-executor case
   already used; Locke-only.
   *Design choice — documentation; see `voteExecutor` above.*
-- **`environmentLandExecutorNeglectGraceTimesteps` /
-  `environmentLandExecutorNeglectPenalty` entries** (new) — Document the
-  executor neglect window (measured from when a debt ripens) and the
-  per-debt-per-timestep grievance it accrues to `executorGrievance`;
-  Locke-only. The `environmentLandExecutorReviewThreshold` entry that
-  previously sat alongside these is gone — since Phase 6,
-  `reviewExecutor` runs at every legislative reconvening unconditionally
-  rather than waiting for a summed-`executorGrievance` threshold (see
-  `doGovernanceReview` above).
-  *Design choice — documentation; see `voteExecutor` / `reviewExecutor` above.*
+- **`environmentLandExecutorNeglectPenalty` entry** (new, rewritten) —
+  Documents the per-debt-per-timestep grievance accrued to
+  `executorGrievance` for a debt still unenforced, and that a debt is
+  collectible/countable-as-neglected starting the very timestep it's
+  created — no grace period at all; Locke-only. The
+  `environmentLandForcefulCollectionGraceTimesteps`,
+  `environmentLandExecutorNeglectGraceTimesteps`, and
+  `environmentLandExecutorReviewThreshold` entries that previously sat
+  alongside this are all gone — there is no grace window or threshold
+  left to size: `reviewExecutor` runs at every legislative reconvening
+  unconditionally regardless (see `doGovernanceReview` above).
+  *Design choice — documentation; see `voteExecutor` / `reviewExecutor` above; the no-grace-period choice is Sect. 12/19 — Locke gives reparation no waiting period.*
 - **`environmentLandExecutorPartialityPenalty` / `environmentLandExecutorPursuitWeight`
   entries** (new) — Document the partiality grievance (fed into ordinary
   `grievance`, distinct from `executorGrievance`) and the movement-scoring

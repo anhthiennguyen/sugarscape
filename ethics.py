@@ -598,12 +598,9 @@ class Locke(agent.Agent):
         executor = self.locke["governmentExecutor"]
         if executor is None or self not in executor:
             return None
-        configuration = self.cell.environment.sugarscape.configuration
-        grace = configuration["environmentLandForcefulCollectionGraceTimesteps"]
         government = self.locke["government"] or {self}
         collectible = [debt for member in government for debt in member.locke["debtsReceivable"]
                        if debt["debtor"].isAlive()
-                       and self.timestep - debt["createdTimestep"] >= grace
                        and debt["debtor"].sugar + debt["debtor"].spice > 0]
         if len(collectible) == 0:
             return None
@@ -845,13 +842,10 @@ class Locke(agent.Agent):
 
     def doForcefulDebtCollection(self):
         configuration = self.cell.environment.sugarscape.configuration
-        graceTimesteps = configuration["environmentLandForcefulCollectionGraceTimesteps"]
         for neighbor in self.cell.findNeighborAgents():
             if neighbor is self or neighbor.isAlive() == False:
                 continue
             for debt in list(self.agentLandDebtsOwed(neighbor)):
-                if self.timestep - debt["createdTimestep"] < graceTimesteps:
-                    continue
                 creditor = debt["creditor"]
                 if creditor.isAlive() == False:
                     self.removeSettledDebt(debt)
@@ -894,7 +888,7 @@ class Locke(agent.Agent):
                     for member in government:
                         if member is self:
                             continue
-                        if any(d["debtor"].isAlive() and self.timestep - d["createdTimestep"] >= graceTimesteps
+                        if any(d["debtor"].isAlive()
                                and d["debtor"].sugar + d["debtor"].spice > 0 for d in member.locke["debtsReceivable"]):
                             member.locke["grievance"] += partialityPenalty
                             if "all" in self.debug or "agent" in self.debug:
@@ -1217,12 +1211,9 @@ class Locke(agent.Agent):
         self.runLevyPass(government)
         configuration = self.cell.environment.sugarscape.configuration
         if self.locke["governmentExecutor"] is None or self not in self.locke["governmentExecutor"]:
-            grace = configuration["environmentLandForcefulCollectionGraceTimesteps"]
-            neglectGrace = configuration["environmentLandExecutorNeglectGraceTimesteps"]
             penalty = configuration["environmentLandExecutorNeglectPenalty"]
             unenforced = sum(1 for debt in self.locke["debtsReceivable"]
                              if debt["debtor"].isAlive()
-                             and self.timestep - (debt["createdTimestep"] + grace) >= neglectGrace
                              and debt["debtor"].sugar + debt["debtor"].spice > 0)
             if unenforced > 0:
                 self.locke["executorGrievance"] += penalty * unenforced
