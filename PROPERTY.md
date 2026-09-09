@@ -739,24 +739,40 @@ government commit `9a70cff`); for that commit's original per-method citations se
   regardless of distance. Non-executors and executors with nothing
   collectible get `None` (no pursuit bias).
   *Design choice — which of possibly several outstanding debts to chase (oldest, not nearest) is invented; Sect. 126 establishes only that an executive power to reach transgressors must exist, not a prioritization rule among several. No grace period is a design choice too, though the more literal one: Locke never describes reparation as needing to wait.*
-- **`isDesperate(self)`** (`612-613`) — Returns `True` if `self` would end
-  this timestep with negative sugar or negative spice on its *current*
-  holdings alone (`sugar - findSugarMetabolism() < 0`, or the spice
-  equivalent) — i.e. the agent is about to die of starvation this very
-  timestep unless it finds more. Reused only by `findEthicalValueOfCell`
-  below; a cheap, purely-arithmetic check with no side effects.
-  *Locke, First Treatise, Sect. 42: "As justice gives every man a title to the product of his honest industry... so charity gives every man a title to so much out of another's plenty, as will keep him from extreme want, where he has no means to subsist otherwise." A man on the brink of starving has a natural claim overriding another's ordinary exclusive right — this codebase's version of that claim is behavioral (he'll go take it) rather than a title anyone else recognizes, but the citation is for the underlying claim, not the enforcement mechanism, which Locke doesn't specify. This is a First Treatise citation; unlike every other citation in this file it could not be checked against the locally available Second Treatise PDF (see CLAUDE.md) and is sourced from general familiarity with the passage's wording and context — flagged here rather than presented with the same confidence as a directly verified quote.*
+- **Removed: `isDesperate(self)`.** Used to return `True` if `self` would
+  end the timestep with negative sugar or negative spice on its *current*
+  holdings alone, and `findEthicalValueOfCell` (below) used it to override
+  every exclusion/restraint branch — a starving agent would treat any
+  cell, foreign or not, at full raw value. Grounded in Locke's First
+  Treatise Sect. 42 (a charity right to another's plenty in extreme want)
+  — flagged even when it existed as a citation that couldn't be checked
+  against the locally available Second Treatise PDF (see `CLAUDE.md`).
+  **Removed after an ablation showed it hurts aggregate survival, not
+  helps it**: a 25-seed same-seed sample of `config.json`'s pure-`"locke"`
+  population (reproduced identically across two independent reruns of
+  each condition) found 8/25 extinct (32%) with desperation active vs.
+  4/25 extinct (16%) with it ablated — removing the override roughly
+  halved the extinction rate. Consent withdrawal (grievance-driven) also
+  fired less often without it (~7.4/seed vs. ~5.6/seed); government
+  dissolution (<2 members) was unaffected either way (~41.2 vs. ~40.2/seed).
+  Plausible mechanism, not independently confirmed by further
+  instrumentation: a desperate trespass still creates a violation debt
+  when the land isn't a paid-toll territory, and unconditionally resets
+  every witnessing neighbor's trust in the trespasser
+  (`recordLandTrespassIfOwned`'s trailing block) — a population where
+  starving agents periodically incur debt and wreck their own trust
+  standing this way seems to end up *less* resilient in aggregate than
+  one where they simply starve without those liabilities, even though the
+  override clearly helps the individual agent survive that one timestep.
 - **`findEthicalValueOfCell(self, cell, pursuitTarget=None)`** (`615-639`) —
   Computes a cell's attractiveness for the movement decision as
   `sugar + spice`, adjusted when the cell is owned by another living agent.
-  If `self.isDesperate()`, none of the adjustments below apply at all —
-  the cell scores at its full raw value, foreign or not, closed policy or
-  not, restrained or not: desperation overrides every other branch,
-  including restraint. Otherwise, if `self.locke["restrained"]` is set,
+  If `self.locke["restrained"]` is set,
   the adjusted value is always `-(sugar + spice) - 1` regardless of
   anything else (negative, richer claims avoided harder) — a
-  restrained-but-not-desperate agent forswears foreign land entirely,
-  even land it could otherwise lawfully pay into. **Briefly removed as
+  restrained agent forswears foreign land entirely, unconditionally
+  (no desperation override exists any more — see `isDesperate`'s removal
+  above), even land it could otherwise lawfully pay into. **Briefly removed as
   dead code, then restored**: while `doForcefulDebtCollection` enforced
   via the unconditionally-lethal `doCombat`, no debtor ever survived
   collection, so `restrained` (settable only on a survivor) could never

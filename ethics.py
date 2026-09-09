@@ -642,16 +642,11 @@ class Locke(agent.Agent):
             return None
         return min(collectible, key=lambda debt: debt["createdTimestep"])["debtor"]
 
-    def isDesperate(self):
-        return (self.sugar - self.findSugarMetabolism() < 0) or (self.spice - self.findSpiceMetabolism() < 0)
-
     def findEthicalValueOfCell(self, cell, pursuitTarget=None):
         cellValue = cell.sugar + cell.spice
         owners = self.cellOwners(cell)
         if len(owners) > 0 and self not in owners and any(owner.isAlive() == True for owner in owners):
-            if self.isDesperate():
-                pass
-            elif self.locke["restrained"] == True:
+            if self.locke["restrained"] == True:
                 cellValue = -(cell.sugar + cell.spice) - 1
             else:
                 territoryGovernment = self.territoryGovernmentFor(cell)

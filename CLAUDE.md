@@ -201,23 +201,29 @@ class; a government is a bare `set()` of member agents).
   argument that a person's labour and consumption naturally bound their
   just holdings to "a small part," made explicit here as a hard cap since
   an agent's vision/movement/lifespan let it wander far past that.
-- **Added: desperation overrides moral restraint (`isDesperate`).** A
-  Locke agent about to end this timestep with negative sugar or spice on
-  its current holdings alone treats every cell at full value, foreign or
-  not, closed policy or not, restrained or not — literal starvation
-  overrides both the ordinary exclusion and the stricter restrained
-  penalty. (`restrained` was briefly removed as dead code mid-session,
-  then restored — see the debt-collection bullet below; this override
-  relationship is unaffected either way, since desperation always ran
-  first regardless of what the `restrained` branch did.) Grounded in
-  Locke's First Treatise Sect. 42 (the "charity"
-  right to another's plenty in extreme want) — flagged as unverifiable
-  against the locally available PDF, which is Second Treatise only (see
-  the citation-honesty section above); sourced from general familiarity
-  with the passage. The trespass itself is still recorded and still
-  accrues a debt exactly as any other trespass would — desperation
-  changes the *decision* to enter, not the consequences of having
-  entered.
+- **Added, then removed: desperation overriding moral restraint
+  (`isDesperate`).** Originally: a Locke agent about to end the timestep
+  with negative sugar or spice on its current holdings alone treated every
+  cell at full value, foreign or not, closed policy or not, restrained or
+  not — literal starvation overriding both the ordinary exclusion and the
+  restrained penalty, grounded in Locke's First Treatise Sect. 42 (the
+  "charity" right to another's plenty in extreme want — flagged as
+  unverifiable against the locally available PDF, which is Second
+  Treatise only). **Removed** after an ablation showed it hurts aggregate
+  survival rather than helping it: a 25-seed same-seed sample (reproduced
+  identically across two independent reruns per condition, unusually
+  stable for this codebase) found 8/25 extinct (32%) with it active vs.
+  4/25 extinct (16%) ablated — removing it roughly halved the extinction
+  rate; consent withdrawal also fired less often without it (~7.4/seed vs.
+  ~5.6/seed), while government dissolution was unaffected (~41.2 vs.
+  ~40.2/seed). Plausible mechanism (not independently confirmed further):
+  a desperate trespass still creates a violation debt on non-toll land and
+  unconditionally resets every witnessing neighbor's trust in the
+  trespasser, so a population where starving agents periodically incur
+  debt and wreck their own trust standing this way ends up less resilient
+  in aggregate than one where they simply starve without those
+  liabilities — even though the override clearly helped the individual
+  agent survive that one timestep.
 - **Added: consent-based co-ownership grants (`doLandConsentGrants`),
   motivated by guarding against decay.** Once a claim has gone unharvested
   for more than half of `environmentLandDecayTimesteps`, its owner looks
