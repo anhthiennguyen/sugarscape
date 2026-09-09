@@ -32,19 +32,32 @@ class; a government is a bare `set()` of member agents).
 
 ## Architecture
 
-- `ethics.py` `class Locke` (~`552`–end) — everything Locke.
-- `agent.py` — base `Agent`. Three methods carry Locke-relevant logic because
-  any decision model can trespass: `recordLandTrespassIfOwned` (trespass
-  detection, witness trust reset, territory-toll interception — all duck-typed
-  via `getattr(x, "locke", None)` since `agent.py` cannot import `ethics.py`),
-  `collectResourcesAtCell` (records `lastHarvest`, gates claim creation on a
-  non-zero harvest), and `doTimestep` itself, which calls two no-op hooks —
+- `ethics.py` `class Locke` (~`552`–end) — everything Locke, including
+  trespass detection and debt enforcement (see below) — nothing Locke-
+  specific lives in `agent.py` at all as of the current design.
+- `agent.py` — base `Agent`. `doTimestep` calls two no-op hooks —
   `doGovernment()` right after `doTrading()`, `doProperty()`
   right after `updateValues()`, same gating as those calls — so a decision
   model with extra per-timestep behavior that isn't trading or value-updating
   (Locke's land/government/debt machinery) doesn't have to override
   `doTrading`/`updateValues` themselves. Only `Locke` overrides the hooks; every
-  other decision model inherits the no-op unchanged.
+  other decision model inherits the no-op unchanged. `doSteal(self, cell,
+  amount)` is a new, generic (non-`Locke`-specific), non-lethal sibling to
+  the pre-existing `doCombat`: loots up to `amount` from `cell.agent`,
+  capped at what they hold, returns `(sugarLoot, spiceLoot)`, doesn't kill
+  or relocate anyone. `Locke` is currently its only caller, but it carries
+  no Locke-specific knowledge.
+- `recordLandTrespassIfOwned` is **`Locke`-only, not universal**, and lives
+  entirely under `class Locke`, called directly from `Locke`'s own
+  `collectResourcesAtCell` override (not from any `agent.py` call site or
+  hook — `agent.py`'s `collectResourcesAtCell` is completely untouched).
+  `doForcefulDebtCollection` enforces via `doSteal` (non-lethal, amount
+  capped at what's actually owed). A non-`Locke` agent can graze
+  Locke-claimed land with zero consequence, and only `Locke` debtors are
+  ever targeted. See the recurring-pattern bullets below for the
+  tradeoffs made, why, and the two intermediate designs (a `doCombat`-based
+  lethal version, and briefly a no-op-stub-on-`Agent` version) this
+  superseded.
 - `PROPERTY.md` — the citation-honesty reference. Line numbers drift; keep the
   ones for entries you rewrite accurate, don't chase the rest.
 - `README`, `config.json`, `sugarscape.py`, `examples/locke_basic.json` — see
@@ -116,10 +129,14 @@ class; a government is a bare `set()` of member agents).
   crosses `environmentLandLegislatureGrievanceThreshold`, it forces an
   early reconvening ahead of the interval, distinct from both other
   channels (`doGovernanceReview`).
-- **Rare-mechanism findings**: several mechanisms (`restrained`, the
-  `executorGrievance` channel) are coherent and scratch-tested but seldom fire in
-  practice. Treat that rarity as a Lockean result (§225/§230 — rebellion is a
-  last resort), not a bug to force.
+- **Rare-mechanism findings**: `executorGrievance` and `restrained` are
+  coherent and scratch-tested but seldom fire in practice. Treat that
+  rarity as a Lockean result (§225/§230 — rebellion is a last resort), not
+  a bug to force. (`restrained` briefly became permanently unreachable and
+  was removed outright mid-session, when debt collection went through a
+  lethal `doCombat`-based design that let no debtor survive to be
+  restrained — restored once collection moved to the non-lethal `doSteal`;
+  see the debt-collection bullet below.)
 - **Fixed finding: movement valuation ignored the toll-paying lawful-access
   path, suppressing reproduction enough to tip marginal populations into
   extinction**. `findEthicalValueOfCell` used to score *every* foreign
@@ -182,7 +199,11 @@ class; a government is a bare `set()` of member agents).
   its current holdings alone treats every cell at full value, foreign or
   not, closed policy or not, restrained or not — literal starvation
   overrides both the ordinary exclusion and the stricter restrained
-  penalty. Grounded in Locke's First Treatise Sect. 42 (the "charity"
+  penalty. (`restrained` was briefly removed as dead code mid-session,
+  then restored — see the debt-collection bullet below; this override
+  relationship is unaffected either way, since desperation always ran
+  first regardless of what the `restrained` branch did.) Grounded in
+  Locke's First Treatise Sect. 42 (the "charity"
   right to another's plenty in extreme want) — flagged as unverifiable
   against the locally available PDF, which is Second Treatise only (see
   the citation-honesty section above); sourced from general familiarity
@@ -256,6 +277,53 @@ class; a government is a bare `set()` of member agents).
   sound basis for comparing two versions of the code — never a single
   seed's exact outcome, and even aggregate stats need a same-code
   rerun as a noise baseline before trusting a small observed gap.
+- **Redesigned: `recordLandTrespassIfOwned` moved from a universal
+  base-`Agent` check to a `Locke`-only method, an explicit tradeoff, not
+  a citation-honesty improvement.** The original version's whole point was
+  Sect. 6 universality — it fired for any decision model trespassing on
+  Locke-claimed land. Moved into `class Locke` at the caller's request (to
+  keep all property logic in one place). Consequence, deliberately
+  accepted: a non-`Locke` agent can graze Locke-claimed land with zero
+  consequence — no toll, no debt, no trust reset. A 16-seed
+  `["locke", "none"]` run confirmed the mechanism directly (tens of
+  thousands of free harvests per seed that used to hit the toll/violation
+  pipeline) but found no clean, one-directional population effect —
+  consistent with this simulation's established chaotic sensitivity to
+  any code change. **Final wiring** (after an intermediate no-op-stub-on-
+  `Agent` design): `agent.py`'s `collectResourcesAtCell` is completely
+  untouched; `Locke`'s own pre-existing `collectResourcesAtCell` override
+  (already there for claim creation) calls `recordLandTrespassIfOwned`
+  directly — no hook, no stub, no base-class involvement of any kind.
+- **Redesigned twice: forceful debt collection's enforcement mechanism.**
+  Original: manual `neighbor.sugar -=`/`creditor.sugar +=` number
+  manipulation — no attack, no confrontation, nothing the base engine
+  recognized as a modeled event; from the debtor's perspective,
+  indistinguishable from theft. **First redesign** (superseded): routed
+  through the base engine's pre-existing `doCombat(cell)` — reused engine
+  code with no new `agent.py` method, but `doCombat` is unconditionally
+  lethal with loot capped by a flat `maxCombatLoot` unrelated to the debt,
+  so every collection killed the debtor regardless of how small the debt
+  was. This made the `restrained` flag (Sect. 12's non-lethal restraint,
+  set only on a survivor) permanently unreachable — removed as dead code,
+  along with its read site in `findEthicalValueOfCell`. **Final design**:
+  a new, minimal, generic `agent.py` method, `doSteal(self, cell, amount)`
+  — mirrors `doCombat`'s structure (a real, modeled event, loots up to a
+  cap, transfers to the caller) but takes `amount` as a parameter instead
+  of a flat constant, doesn't kill, doesn't relocate the attacker (the
+  victim is still on that cell). `doForcefulDebtCollection` calls it with
+  `amount = debt["amount"]`, so a poor debtor pays what they can and the
+  remainder stays outstanding rather than the whole debt vanishing either
+  way. This let `restrained` come back too, since a debtor can survive
+  collection again. Citation payoff: Sect. 12's proportionality cap
+  ("sufficient to make it an ill bargain... give him cause to repent") is
+  now honored literally — recover up to what's owed, no more, no killing
+  — resolving the tension the `doCombat` version had knowingly accepted.
+  Verified via scratch tests (full and partial recovery, `restrained`
+  set, `doSteal` itself unit-tested) and a 25-seed same-seed sample of
+  pure-`"locke"`: 28% extinct, the low end of (not outside) the 28-40%
+  noise band every version of this method has landed in across several
+  same-seed reruns this session — no version has ever been shown to
+  differ from another beyond that noise.
 
 ## Config plumbing (load-bearing gotcha)
 

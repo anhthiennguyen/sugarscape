@@ -577,6 +577,44 @@ class Locke(agent.Agent):
         self.processLandAbandonment()
         self.settleDebtsVoluntarily()
 
+    def recordLandTrespassIfOwned(self, sugarCollected, spiceCollected):
+        owners = getattr(self.cell, "owners", None)
+        if not owners or self in owners or not any(owner.isAlive() == True for owner in owners):
+            return
+        territoryGovernment = None
+        for owner in owners:
+            ownerLocke = getattr(owner, "locke", None)
+            if ownerLocke is not None and owner.isAlive() == True and ownerLocke["government"] is not None:
+                territoryGovernment = ownerLocke["government"]
+                break
+        selfLocke = getattr(self, "locke", None)
+        selfIsMember = selfLocke is not None and selfLocke["government"] is territoryGovernment
+        if territoryGovernment is not None and not selfIsMember:
+            landUse = next(iter(territoryGovernment)).locke["governmentLandUse"]
+            harvested = sugarCollected + spiceCollected
+            toll = harvested * landUse if landUse != "closed" else 0
+            if landUse != "closed" and toll > 0 and self.sugar + self.spice >= toll:
+                paidSugar = min(max(0.0, self.sugar), toll)
+                paidSpice = toll - paidSugar
+                self.sugar -= paidSugar
+                self.spice -= paidSpice
+                for owner, share in owners.items():
+                    owner.sugar += paidSugar * share
+                    owner.spice += paidSpice * share
+                if "all" in self.debug or "agent" in self.debug:
+                    print(f"Agent {self.ID} pays a land-use toll of {round(toll, 2)} to harvest in government territory at ({self.cell.x},{self.cell.y})")
+                return
+        if not hasattr(self.cell, "pendingViolations"):
+            self.cell.pendingViolations = []
+        self.cell.pendingViolations.append({"trespasser": self, "cell": self.cell,
+                                             "amount": sugarCollected + spiceCollected,
+                                             "timestep": self.timestep, "owners": dict(owners)})
+        if "all" in self.debug or "agent" in self.debug:
+            print(f"Agent {self.ID} trespasses on claimed cell ({self.cell.x},{self.cell.y}), harvesting {round(sugarCollected + spiceCollected, 2)}")
+        for other in self.cell.findNeighborAgents():
+            if hasattr(other, "resetTrustIn"):
+                other.resetTrustIn(self)
+
     def findBestEthicalCell(self, cells, greedyBestCell=None):
         if len(cells) == 0:
             return None
@@ -612,7 +650,7 @@ class Locke(agent.Agent):
         owners = self.cellOwners(cell)
         if len(owners) > 0 and self not in owners and any(owner.isAlive() == True for owner in owners):
             if self.isDesperate():
-                pass  # desperation overrides exclusion and restraint alike - see below
+                pass
             elif self.locke["restrained"] == True:
                 cellValue = -(cell.sugar + cell.spice) - 1
             else:
@@ -620,9 +658,6 @@ class Locke(agent.Agent):
                 isMember = territoryGovernment is not None and self.locke["government"] is territoryGovernment
                 landUse = None if territoryGovernment is None else next(iter(territoryGovernment)).locke["governmentLandUse"]
                 if territoryGovernment is not None and not isMember and landUse is not None and landUse != "closed":
-                    # Lawful toll-paying access (Sect. 119/124, see recordLandTrespassIfOwned in
-                    # agent.py) - the same discount that toll actually costs at harvest time, so
-                    # movement scoring doesn't treat payable land as worthless as closed land.
                     cellValue = cellValue * (1 - landUse)
                 else:
                     cellValue = 0
@@ -650,9 +685,12 @@ class Locke(agent.Agent):
 
     def collectResourcesAtCell(self):
         cell = self.cell
-        harvested = cell.sugar + cell.spice
+        sugarCollected = cell.sugar
+        spiceCollected = cell.spice
+        harvested = sugarCollected + spiceCollected
         self.locke["lastHarvest"] = harvested
         super().collectResourcesAtCell()
+        self.recordLandTrespassIfOwned(sugarCollected, spiceCollected)
         if harvested <= 0:
             return
 
@@ -866,21 +904,19 @@ class Locke(agent.Agent):
                         print(f"Agent {self.ID} leaves Agent {neighbor.ID}'s debt to Agent "
                               f"{creditor.ID} to {target}")
                     continue
-                availableSugar = max(0, neighbor.sugar)
-                availableSpice = max(0, neighbor.spice)
-                seizure = min(debt["amount"], availableSugar + availableSpice)
-                if seizure <= 0:
+                sugarRecovered, spiceRecovered = self.doSteal(neighbor.cell, debt["amount"])
+                recovered = sugarRecovered + spiceRecovered
+                if recovered <= 0:
                     continue
-                seizeSugar = min(availableSugar, seizure)
-                seizeSpice = seizure - seizeSugar
-                neighbor.sugar -= seizeSugar
-                neighbor.spice -= seizeSpice
-                creditor.sugar += seizeSugar
-                creditor.spice += seizeSpice
-                debt["amount"] -= seizure
+                if creditor is not self:
+                    self.sugar -= sugarRecovered
+                    self.spice -= spiceRecovered
+                    creditor.sugar += sugarRecovered
+                    creditor.spice += spiceRecovered
+                debt["amount"] -= recovered
                 if "all" in self.debug or "agent" in self.debug:
                     role = " (assisting the executor, Sect. 130)" if assisting else ""
-                    print(f"Agent {self.ID} forcefully collects {round(seizure, 2)} from Agent {neighbor.ID} on behalf of Agent {creditor.ID}{role} ({round(debt['amount'], 2)} remaining)")
+                    print(f"Agent {self.ID} forcefully steals {round(recovered, 2)} from Agent {neighbor.ID} on behalf of Agent {creditor.ID}{role} ({round(debt['amount'], 2)} remaining)")
                 if creditor is self and government is not None and selfIsExecutor:
                     partialityPenalty = configuration["environmentLandExecutorPartialityPenalty"]
                     for member in government:
@@ -894,7 +930,7 @@ class Locke(agent.Agent):
                 if isinstance(neighbor, Locke) and neighbor.locke["restrained"] == False:
                     neighbor.locke["restrained"] = True
                     if "all" in neighbor.debug or "agent" in neighbor.debug:
-                        print(f"Agent {neighbor.ID} is restrained after collection and will avoid claimed land")
+                        print(f"Agent {neighbor.ID} is restrained after being stolen from and will avoid claimed land")
                 if debt["amount"] <= 0:
                     self.removeSettledDebt(debt)
 

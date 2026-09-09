@@ -102,12 +102,21 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `collectResourcesAtCell` only after a non-zero harvest.
   *Locke, Sect. 27/28: property is made from what a man "removes out of the state that nature hath provided" — "that labour... added something to them more than nature... and so they became his private right." No removal, no claim; the harvest gate in `collectResourcesAtCell` is what enforces this.*
 - **`collectResourcesAtCell(self)`** (`656-669`) — Override of the base
-  harvesting method. Captures `cell.sugar + cell.spice` **before**
-  `super().collectResourcesAtCell()` (the parent zeroes the cell at the end,
-  so the amount can't be read afterwards), records it as
-  `self.locke["lastHarvest"]` every timestep — before the gate, so a
-  no-harvest timestep records `0.0` and is not levied on a stale value — then
-  **returns immediately if nothing was harvested**. Only on a non-zero harvest
+  harvesting method. Captures `cell.sugar` and `cell.spice` separately
+  **before** `super().collectResourcesAtCell()` (the parent zeroes the
+  cell at the end, so the amounts can't be read afterwards), records
+  their sum as `self.locke["lastHarvest"]` every timestep — before the
+  gate, so a no-harvest timestep records `0.0` and is not levied on a
+  stale value — then calls `recordLandTrespassIfOwned(sugarCollected,
+  spiceCollected)` with the same snapshotted amounts, **unconditionally**
+  (even on a zero harvest, matching this call's behavior from when it
+  lived in `agent.py` — see that method's own entry). This call must come
+  after `super().collectResourcesAtCell()`, not before: the toll-payment
+  branch inside it checks `self.sugar + self.spice >= toll`, which needs
+  to already include this timestep's harvest (added by `super()`) to
+  correctly judge whether the harvest just gathered is enough to cover
+  the toll. Only *after* that does it **return immediately if nothing was
+  harvested**. Only on a non-zero harvest
   does it dispatch: claim an unclaimed cell if `self` is currently below
   `environmentLandMaxClaimsPerAgent` **and** `leavesEnoughForNeighbors`
   says the proviso is satisfied — both conditions, not either — or, if
@@ -218,8 +227,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   every claim the agent holds; forfeits any cell the *owner* hasn't
   harvested in `environmentLandDecayTimesteps` steps, otherwise keeps it in
   the agent's claims list. A trespasser harvesting the
-  cell does not reset this clock (see `recordLandTrespassIfOwned` in
-  `agent.py` below) — a claim under continuous theft still decays; a
+  cell does not reset this clock (see `recordLandTrespassIfOwned` above)
+  — a claim under continuous theft still decays; a
   claim under **co-ownership** does not, as long as any one owner tends
   it (see `doLandConsentGrants` above).
   *Locke, Sect. 38 (see `forfeitCellClaim` above) grounds losing land through non-use; the specific numeric timestep threshold (`environmentLandDecayTimesteps`) is a design choice — Locke never puts a number on it.*
@@ -230,9 +239,37 @@ government commit `9a70cff`); for that commit's original per-method citations se
   *Locke, Sect. 37: "the intrinsic value of things... depends only on their usefulness to the life of man," combined with Sect. 47: "And thus came in the use of money, some lasting thing that men might keep without spoiling, and that by mutual consent men would take in exchange for the truly useful, but perishable supports of life." Together these ground value as commensurable across different useful goods, but it's a stretched analogy: Locke's money is valuable specifically because it is NOT one of the perishable staples, whereas sugar and spice here are the staples themselves — the "same nominal value regardless of resource" rule has no tight single-passage match.*
 - **`doForcefulDebtCollection(self)`** (`766-813`) — Runs every timestep; for
   every neighboring agent, for every debt that neighbor owes — collectible
-  starting the very timestep it's created, no grace period — seizes
-  whatever sugar/spice the debtor holds (capped at the debt) and pays it
-  to the creditor. The gate, in order: **`self` is the creditor** (ungated self-help);
+  starting the very timestep it's created, no grace period — enforces the
+  debt by calling the base engine's `agent.Agent.doSteal(cell, amount)`
+  with `amount = debt["amount"]`: the debtor survives, `doSteal` returns
+  the actual sugar/spice recovered (capped at what the debtor holds, so a
+  poor debtor may only partially satisfy the debt), and the debt's
+  `amount` is reduced by exactly that much — `removeSettledDebt` only
+  fires once it reaches zero, so an insolvent debtor keeps the remainder
+  outstanding for a future attempt. `doSteal` always pays whoever calls
+  it, so when `self` isn't the creditor (the executor collecting for a
+  fellow member, or an assisting member), the recovered amount is
+  forwarded from `self` to the actual `creditor` afterward. **Two prior
+  designs superseded, in order**: first, manual `neighbor.sugar -=`/
+  `creditor.sugar +=` number manipulation with no attack at all — from the
+  debtor's own perspective indistinguishable from theft, nothing the base
+  engine recognized as a modeled event; then a version routed through the
+  base engine's existing `doCombat(cell)`, reusing engine code with no new
+  `agent.py` method, but `doCombat` is unconditionally lethal and its loot
+  is capped by `maxCombatLoot`, not the debt — every collection killed the
+  debtor regardless of how small the debt was, which is a poor fit for
+  Sect. 12's proportionality ("sufficient to make it an ill bargain...
+  give him cause to repent"). `doSteal` is new, minimal `agent.py` code
+  (`agent.py:300-311`, mirroring `doCombat`'s structure but parameterized
+  by `amount` instead of a flat environment-wide cap, no `doDeath` call,
+  no `gotoCell` relocation since the victim is still occupying the cell)
+  written specifically to fix this: it makes enforcement a real, modeled
+  event like `doCombat` does, while letting the caller decide how much to
+  take and leaving the target alive — the closest fit yet to Sect. 12's
+  actual proportionality reading. Written generically (no debt-awareness,
+  no `Locke` reference) so any decision model could reuse it, matching how
+  `doCombat` itself is written for any aggressive agent, not one decision
+  model. The gate, in order: **`self` is the creditor** (ungated self-help);
   or **`self` is one of its government's `governmentExecutor` set and the
   creditor is a fellow member**; or — new — **`self` is a non-executor
   member, the creditor is a fellow member, the government has at least one
@@ -246,7 +283,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   step (the debtor may be momentarily empty). The executor only encounters
   debts of agents adjacent to it, so recognition spreads as it moves; the flag,
   once set, persists on the debt record until the debt is settled. When a
-  seizure lands on a `Locke` debtor its `restrained` flag is set (Sect. 12).
+  steal lands on a `Locke` debtor its `restrained` flag is set (Sect. 12)
+  — **restored** after being removed as dead code during the brief
+  `doCombat`-based design above, since a debtor who survives collection is
+  exactly the scenario this flag exists for; see `findEthicalValueOfCell`'s
+  entry for what it does.
   **Partiality**: immediately after any executor successfully seizes on its
   *own* debt, it checks every other government member for a debt
   receivable of their own that is already collectible (alive and solvent
@@ -272,12 +313,30 @@ government commit `9a70cff`); for that commit's original per-method citations se
   timestep 500. Faster, more certain enforcement keeps less wealth tied
   up in unresolved trespass debt during the population's fragile early
   window.
-  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender." Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes). The partiality grievance is Sect. 199: the executor exercising its enforcement power "to his own private separate advantage" — the same citation already grounding `"proportional"` redistribution's wrong in `runLevyPass`, feeding the same rebellion pathway (Sect. 240) rather than a new one. Penalizing every currently-neglected member per occurrence, rather than a single representative case, is a design choice. No grace period gates any of this: Locke gives reparation no waiting period (Sect. 12/19), so instant enforcement is, if anything, the more literal reading, not a departure from one.*
+  **`doSteal` redesign, verified**: scratch tests confirm `doSteal` itself
+  (unit-tested directly: caps loot at the requested `amount` and at what
+  the target actually holds, transfers to the caller, never kills, never
+  relocates the caller) and `doForcefulDebtCollection`'s use of it (a full
+  recovery discharges the debt and sets `restrained`; a partial recovery —
+  debtor has less than owed — leaves the remainder outstanding and does
+  *not* call `removeSettledDebt`). A 25-seed same-seed sample of
+  `config.json`'s pure-`"locke"` population found 18/25 survived at
+  timestep 500 (28% extinct) — the low end of, not outside, the 28-40%
+  extinction band already established for this method's prior versions
+  across several same-seed reruns this session (see `CLAUDE.md`'s
+  methodological note on single-seed noise: this simulation is not
+  reproducible run-to-run even for byte-identical code, so no version of
+  this method has ever been shown to differ from another by more than
+  that noise band). Not verified against a mixed `["locke", "none"]`
+  population specifically for this change, since `recordLandTrespassIfOwned`
+  being `Locke`-only (see its own entry) already means debts, and
+  therefore this method, never touch non-`Locke` agents at all.
+  *Sect. 19 grounds why self-help force is legitimate at all — there is no common judge/magistracy to appeal to. Sect. 12 grounds the cap: "sufficient to make it an ill bargain to the offender" — `doSteal`'s `amount` parameter lets the caller honor this literally (recover up to what's owed, no more), unlike the `doCombat`-based version this superseded, whose flat `maxCombatLoot` cap and mandatory killing had no relationship to the actual debt. Sect. 11 grounds the ungated **self**-collection: the injured party's right to reparation is gated by nothing. Sect. 126 grounds the appointment itself — the state of nature "wants power... to give [the sentence] due execution", so the society names an executor. Sect. 130 grounds a member assisting at all — on entering society he "engages his natural force... to assist the executive power of the society, as the law thereof shall require", the opposite of freelancing. Sect. 88 grounds gating that assistance on the executor's recognition: the member "has given a right to the common-wealth to employ his force, for the execution of the judgments of the common-wealth, whenever he shall be called to it" — the force executes a judgment already made, not the member's "own private judgment", which Sect. 88 says he "has thereby quitted"; an unrecognized debt has no such judgment for the member to execute, so acting on it would be the Sect. 125 wrong of being judge in one's own society's cause with no indifferent judge. The `executorRecognized` flag is that judgment made concrete; requiring the executor to have physically reached the debt to make it is design-choice plumbing. An earlier "member-visible ledger" version let every member collect for every fellow member on their own initiative; the executor plus this recognition gate supersedes it (Sect. 130/88's step Locke actually describes). The partiality grievance is Sect. 199: the executor exercising its enforcement power "to his own private separate advantage" — the same citation already grounding `"proportional"` redistribution's wrong in `runLevyPass`, feeding the same rebellion pathway (Sect. 240) rather than a new one. Penalizing every currently-neglected member per occurrence, rather than a single representative case, is a design choice. No grace period gates any of this: Locke gives reparation no waiting period (Sect. 12/19), so instant enforcement is, if anything, the more literal reading, not a departure from one.*
 - **`doTrustAccrual(self)`** (`793-806`) — Runs every timestep for every
   cell the agent owns; every neighbor of that cell who is alive, not a
   co-owner, and didn't trespass on it *this* timestep earns one trust point
   from the owner (via `increaseTrust`) — the literal complement of the
-  trespass check `agent.recordLandTrespassIfOwned` already performs,
+  trespass check `recordLandTrespassIfOwned` already performs,
   reusing the same `cellPendingViolations`/`findNeighborAgents` primitives
   rather than re-scanning adjacency separately.
   *Design choice — no textual analog for a quantified trust-building period; Locke never describes trust or reputation being built up numerically before political society forms.*
@@ -638,7 +697,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `self.locke["trust"][violator.ID]` if nonzero. Called on the Locke agents
   who could actually *perceive* a trespass: those adjacent to the trespassed
   cell at that timestep (via the neighbours-only loop in
-  `agent.recordLandTrespassIfOwned`, see `agent.py` below), plus each crediting
+  `recordLandTrespassIfOwned`, above), plus each crediting
   owner when the violation is booked as a debt (in `convertViolationsToDebts`).
   Not the whole population.
   *Locke, Sect. 94: people act on what they perceive — "it hinders not men from feeling... when they perceive, that any man... is out of the bounds of the civil society which they are of". Instant grid-wide knowledge of a transgression is not perception. An earlier Phase 2 version reset every living Locke agent's trust at once, citing Sect. 8 ("a trespass against the whole species") — but Sect. 8 establishes only that the wrong concerns everyone, not that everyone learns of it. Sect. 11 grounds the owner carve-out: the injured party has a particular standing and finds out when the debt lands on the ledger, wherever they were standing. Zeroing the score rather than decaying it is a design choice.*
@@ -694,11 +753,17 @@ government commit `9a70cff`); for that commit's original per-method citations se
   the cell scores at its full raw value, foreign or not, closed policy or
   not, restrained or not: desperation overrides every other branch,
   including restraint. Otherwise, if `self.locke["restrained"]` is set,
-  the adjusted value is always
-  `-(sugar + spice) - 1` regardless of anything else (negative, richer
-  claims avoided harder) — a restrained-but-not-desperate agent forswears
-  foreign land entirely, even land it could otherwise lawfully pay into.
-  Otherwise, the
+  the adjusted value is always `-(sugar + spice) - 1` regardless of
+  anything else (negative, richer claims avoided harder) — a
+  restrained-but-not-desperate agent forswears foreign land entirely,
+  even land it could otherwise lawfully pay into. **Briefly removed as
+  dead code, then restored**: while `doForcefulDebtCollection` enforced
+  via the unconditionally-lethal `doCombat`, no debtor ever survived
+  collection, so `restrained` (settable only on a survivor) could never
+  be set and this branch was removed. Once collection was redesigned
+  again to use the non-lethal `doSteal` (see that method's entry), a
+  collected-from debtor survives again, so the branch, the flag, and its
+  `__init__` initialization were all restored. Otherwise, the
   cell's owning government (`territoryGovernmentFor`) and `self`'s own
   membership in it decide the outcome: if `self` is **not** a member and
   that government's `governmentLandUse` is a **toll price** (not
@@ -709,15 +774,17 @@ government commit `9a70cff`); for that commit's original per-method citations se
   than a worthless one. In every other case (no government, a fellow
   member on a co-member's own specific claim, or `"closed"` land use) the
   value is `0`, exactly as before. An owner on their own cell is
-  unaffected either way. **Fixed finding**: before this, foreign land was
+  unaffected either way. **Fixed finding**: before an earlier change, foreign land was
   scored `0` unconditionally, whether the policy was `"closed"` or a
-  payable toll — the lawful toll-entry path `agent.py` already implements
+  payable toll — the lawful toll-entry path `recordLandTrespassIfOwned`
+  already implements
   was never actually reachable by an agent's own movement choice, since
   the valuation never distinguished a payable toll from outright closure.
   A 100-seed run of the current `config.json` (pure-`"locke"` population)
   showed most seeds crashing to extinction well before timestep 500, with
-  `restrained` and outstanding debts both near zero throughout every
-  doomed run — ruling out trespass punishment or debt seizure as the
+  the (then still-present) `restrained` flag and outstanding debts both
+  near zero throughout every doomed run — ruling out trespass punishment
+  or debt seizure as the
   cause — while a matched, identical-seed comparison against the
   `"none"` (no ethics) decision model showed Locke agents generating
   ~40-60% as many compatible-neighbour reproduction opportunities as
@@ -743,7 +810,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   be closest to the target is still `0` or negative before the pursuit
   term applies). The executor uses the debtor's exact current position,
   not a sensed/inferred one.
-  *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" — exclusion is the primary effect of property, grounding the `0` case (closed policy, or a member on a co-member's own plot, where no lawful entry exists at all). Sect. 119/124 ground the toll-discount case: one who enjoys "any part of the dominions of any government" under its "standing rule" may lawfully remain and pay into it — a non-member entering under a chosen toll price, rather than a closed one, is exercising exactly that lawful path already coded in `recordLandTrespassIfOwned`; valuing it at its net (post-toll) worth is what makes that lawful path a real option for a self-interested mover, not merely something that happens to work out if the agent stumbles onto it. Sect. 12: punishment serves "reparation and restraint" — the negative score for a restrained agent is the restraint half, driving a previously-collected-from agent to enter claimed land only when literally every reachable cell belongs to someone else (this restraint deliberately overrides even a payable toll — Sect. 12's restraint is a response to violation, harsher than the ordinary toll-access terms available to an agent that's never been caught). Restricted to Locke agents (only they carry the flag); non-`Locke` agents (which never run this method) trespass freely, so the trespass → debt → reparation machinery stays exercised regardless. The exact discount formula (`* (1 - landUse)`) is a design choice, though a tightly constrained one — it is exactly the fraction `recordLandTrespassIfOwned` actually keeps after the toll, so any other formula would value the same lawful act inconsistently between the decision to move there and the accounting once there.*
+  *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" — exclusion is the primary effect of property, grounding the `0` case (closed policy, or a member on a co-member's own plot, where no lawful entry exists at all). Sect. 119/124 ground the toll-discount case: one who enjoys "any part of the dominions of any government" under its "standing rule" may lawfully remain and pay into it — a non-member entering under a chosen toll price, rather than a closed one, is exercising exactly that lawful path already coded in `recordLandTrespassIfOwned`; valuing it at its net (post-toll) worth is what makes that lawful path a real option for a self-interested mover, not merely something that happens to work out if the agent stumbles onto it. Sect. 12: punishment serves "reparation and restraint" — the negative score for a restrained agent is the restraint half, driving a previously-collected-from agent to enter claimed land only when literally every reachable cell belongs to someone else (this restraint deliberately overrides even a payable toll — Sect. 12's restraint is a response to violation, harsher than the ordinary toll-access terms available to an agent that's never been caught). The exact discount formula (`* (1 - landUse)`) is a design choice, though a tightly constrained one — it is exactly the fraction `recordLandTrespassIfOwned` actually keeps after the toll, so any other formula would value the same lawful act inconsistently between the decision to move there and the accounting once there.*
 - **`doInheritance(self)`** (`682-717`) — Runs the base wealth-inheritance
   mechanic first, then splits/forfeits the deceased's land shares (Locke
   children co-own; otherwise the share reverts). Discharges the deceased's
@@ -778,6 +845,43 @@ government commit `9a70cff`); for that commit's original per-method citations se
   *Design choice — per-timestep orchestration hook. See
   `doGovernment`'s entry above for the equivalence argument and
   verification method against the prior `updateValues`-override design.*
+- **`recordLandTrespassIfOwned(self, sugarCollected, spiceCollected)`**
+  (`580-`) — Moved here from the base `Agent` class, where it lived as a
+  universal (not `Locke`-specific) check called unconditionally from
+  `collectResourcesAtCell`; now called directly from `Locke`'s own
+  `collectResourcesAtCell` override (see that method's entry below) —
+  `agent.py` no longer references this method at all, by name or
+  otherwise. Internally unchanged: if the cell has a living owner
+  and `self` isn't one of them, it would append a violation record to
+  `cell.pendingViolations` (with a snapshot of the `owners` dict, so the
+  eventual debt is credited to whoever was wronged then — see
+  `convertViolationsToDebts`). **Territory interception first** (Sect.
+  119): a loop over `owners` (now non-duck-typed, since `self` is
+  guaranteed to be `Locke` and `ethics.py` already has direct access to
+  its own state) finds whether the cell is in a government's territory;
+  if it is and `self` is not a member and the government's
+  `governmentLandUse` is not `"closed"`, `self` is charged
+  `harvest * governmentLandUse` (the voted price itself, paid pro rata to
+  the owners) — and if `self` can pay it in full, the harvest is lawful
+  and the method `return`s with **no violation recorded**. `"closed"`, an
+  unpayable toll, or a non-territory cell fall through to the ordinary
+  violation path. Deliberately does **not** touch `lastHarvestedTimestep`
+  — only the owner's own harvest resets the abandonment clock (in
+  `processReturnToOwnedLand`), so a claim under continuous theft still
+  decays per Locke's spoilage proviso, which is keyed to the possessor's
+  own use, not mere third-party contact with the land. **Trailing
+  block**: after the trespass debug print, a loop over
+  `self.cell.findNeighborAgents()` calls `other.resetTrustIn(self)` on any
+  neighbour that has the method — i.e. the `Locke` agents adjacent to the
+  trespassed cell, found via `hasattr` duck-typing (a non-`Locke`
+  neighbour has no `resetTrustIn`). All the trust-reset logic lives in
+  `Locke.resetTrustIn`; this is a bare notification loop. (An earlier
+  version looped over the whole living population — see `resetTrustIn`
+  for why that was scoped down to witnesses.) **Now only ever reachable
+  when `self` is `Locke`** (see the base-class entry's consequence note):
+  a non-`Locke` trespasser is never checked at all, so this method's own
+  logic is unchanged, only its callers are narrower.
+  *Sect. 119/124 ground the toll-discount case: one who enjoys "any part of the dominions of any government" under its "standing rule" may lawfully remain and pay into it. Sect. 94 grounds the notification loop's neighbours-only scope: trust is lost by those who perceive the trespass. The universal Sect. 6 grounding this method carried while it lived on `Agent` ("no one ought to harm another... in his... possessions", binding everyone) no longer applies now that only `Locke`-vs-`Locke` trespass is ever detected — see the `agent.py` section's `collectResourcesAtCell` entry for that tradeoff, made explicitly, not silently.*
 - **`spawnChild(self, childID, birthday, cell, configuration)`**
   (`1143-1144`) — Returns a new `Locke` instance for reproduction, so a
   `Locke` agent's children are also `Locke` agents by default. This is what
@@ -831,43 +935,86 @@ government commit `9a70cff`); for that commit's original per-method citations se
   something this refactor introduced, and means aggregate statistics
   across a seed sample (extinction rate, not per-seed exact match) are
   the only sound way to compare two versions of the code going forward.
-- **`collectResourcesAtCell(self)`** (`249-260`) — One line added:
-  `self.recordLandTrespassIfOwned(sugarCollected, spiceCollected)`, inserted
-  after pollution handling and before the cell's sugar/spice are reset. This
-  ensures every harvest, by every agent type, checks for trespass before the
-  cell's resources are cleared for the next timestep.
-  *Design choice — the insertion point (where in the base harvesting flow the check runs) is architecture, not textual content.*
-- **`recordLandTrespassIfOwned(self, sugarCollected, spiceCollected)`**
-  (`262-299`) — Generic (not `Locke`-specific) trespass detector: if the cell
-  has a living owner and `self` isn't one of them, it would append a
-  violation record to `cell.pendingViolations`
-  (with a snapshot of the `owners` dict, so the eventual debt is credited to
-  whoever was wronged then — see `convertViolationsToDebts`). **Territory
-  interception first** (Sect. 119): a duck-typed loop over `owners`
-  (`getattr(owner, "locke", None)["government"]`, no import of `ethics`) finds
-  whether the cell is in a government's territory; if it is and `self` is not a
-  member and the government's `governmentLandUse` is not `"closed"`, `self` is
-  charged `harvest * governmentLandUse` (the voted price itself, paid pro rata
-  to the owners) — and if `self` can pay it in full, the harvest is lawful and
-  the method `return`s with **no violation recorded**. `"closed"`, an unpayable
-  toll, or a non-territory cell fall through to the ordinary violation path. Non-`Locke`
-  agents pay tolls too (they hold sugar/spice) but the levy/grievance machinery
-  never touches them. Deliberately does **not** touch
-  `lastHarvestedTimestep` — only the owner's own harvest resets the
-  abandonment clock (in `processReturnToOwnedLand`), so a claim under
-  continuous theft still decays per Locke's spoilage proviso, which is keyed
-  to the possessor's own use, not mere third-party contact with the land.
-  Because this lives on the base `Agent` class rather than inside `Locke`,
-  it fires for any decision model, satisfying "any agent regardless of
-  decision model" from the design. **Trailing block**: after the trespass
-  debug print, a loop over `self.cell.findNeighborAgents()` calls
-  `other.resetTrustIn(self)` on any neighbour that has the method — i.e. the
-  `Locke` agents adjacent to the trespassed cell, found via `hasattr`
-  duck-typing (this file can't import `ethics.py`; `ethics.py` already imports
-  `agent`). All the trust-reset logic lives in `Locke.resetTrustIn`; this is a
-  bare notification loop. (An earlier version looped over the whole living
-  population — see `resetTrustIn` for why that was scoped down to witnesses.)
-  *Locke, Sect. 6: "The state of nature has a law of nature to govern it, which obliges every one... no one ought to harm another in his life, health, liberty, or possessions" — the law of nature binds everyone, so the trespass check itself lives on the base `Agent` class. Sect. 94 grounds the notification loop's neighbours-only scope: trust is lost by those who perceive the trespass.*
+- **`collectResourcesAtCell(self)`** (`249-260`) — **No longer touched at
+  all.** This used to have one line added (`self.recordLandTrespassIfOwned
+  (sugarCollected, spiceCollected)`, called unconditionally for every
+  agent type) — first as a universal trespass check living directly here,
+  then, briefly, as a call to a `Locke`-only no-op stub of the same name
+  (so every decision model still paid the cost of a pointless call). Both
+  are gone now: `Locke` overrides `collectResourcesAtCell` itself (it
+  already did, for claim creation — see `ethics.py`'s entry) and calls
+  `recordLandTrespassIfOwned` from there directly, so the base method
+  needs no knowledge of trespass at all, and non-`Locke` decision models
+  pay zero cost for a mechanic that was never theirs.
+  *No longer a design-choice entry — nothing here to justify, since nothing was added.*
+- **`recordLandTrespassIfOwned`** — **No longer exists on `Agent` in any
+  form**, not even a no-op stub. Fully removed after two intermediate
+  designs: first a universal method living directly on `Agent` (fired for
+  every decision model, grounded in Sect. 6's "no one ought to harm
+  another... in his... possessions" binding everyone), then briefly a
+  no-op stub here with the real logic moved to a `Locke`-only override
+  (fired only when `self` happened to be `Locke`, called through the
+  `collectResourcesAtCell` hook above). Both were consequences of trying
+  to keep this class-agnostic; the final design abandons that entirely —
+  the method now lives solely under `class Locke`, called from `Locke`'s
+  own `collectResourcesAtCell` (see `ethics.py`'s entry for the exact
+  mechanics and its own citation). **Same consequence as both prior
+  designs, restated once more for the final version**: a non-`Locke`
+  agent can harvest `Locke`-claimed land completely freely — no toll, no
+  debt, no trust reset. This is a real, standing regression against the
+  Sect. 6 universality the original design satisfied; it is not a
+  citation-honesty improvement, it is an explicit design choice, made
+  because the caller reasoned the check belongs entirely inside `class
+  Locke` rather than anywhere on the base class, no matter how thin.
+  Verified via a 16-seed `["locke", "none"]` multiagent run (from when
+  this was still a `Locke`-only override, not yet fully moved into
+  `collectResourcesAtCell` — the finding is unaffected by that later
+  move, since it only changed the calling mechanism, not who gets
+  checked), instrumented to count harvests by non-`Locke` agents on
+  `Locke`-claimed land: tens of thousands of such harvests per seed go
+  completely unrecorded (e.g. seed `494485441`: 27,596 harvests totaling
+  86,747 sugar+spice) that would have hit the toll/violation pipeline
+  under the original universal version. The population-level effect
+  across that sample was mixed, not one-directional (7/16 vs. 6/16 seeds
+  with any `Locke` survivors) — consistent with this simulation's
+  established sensitivity to any code change (see `doTimestep`'s entry
+  above on `set()`-based nondeterminism), so no clean causal population
+  effect could be isolated, only the mechanical fact that the check no
+  longer fires cross-model.
+  *Design choice, explicitly weaker than the original universal version's Sect. 6 grounding — see the consequence note above. The logic itself, now living entirely under `class Locke`, keeps its own Sect. 119/124 toll citation unchanged.*
+- **`doCombat(self, cell)`** — Unmodified base-engine method (ordinary
+  aggressive-agent combat: unconditionally kills `cell.agent`, loots up to
+  the flat `maxCombatLoot` environment constant, relocates the attacker
+  onto the victim's now-empty cell). Briefly reused by
+  `Locke.doForcefulDebtCollection` as its enforcement mechanism (see that
+  method's `ethics.py` entry) before being superseded by the
+  purpose-built `doSteal` below; no longer called from anywhere in
+  `ethics.py`. Untouched by any of this — still used exactly as before by
+  ordinary movement-triggered aggression (`moveToBestCell`, gated on
+  `findAggression() > 0`), for any decision model.
+  *Not a Locke-specific entry — pre-existing base-engine mechanic, listed here only because `ethics.py` briefly called it.*
+- **`doSteal(self, cell, amount)`** (`300-311`) — New, minimal, generic
+  method, added specifically so `Locke`'s debt enforcement (see
+  `doForcefulDebtCollection`'s `ethics.py` entry) could be a real, modeled
+  event like `doCombat` without either killing the target or being capped
+  by an amount unrelated to what's actually owed. Mirrors `doCombat`'s
+  structure closely: `prey = cell.agent`; loots sugar first then spice, up
+  to `amount` and capped at what `prey` actually holds; transfers the
+  loot to `self`; returns `(sugarLoot, spiceLoot)` so a caller can track
+  exactly how much was recovered. Deliberately **does not** call
+  `prey.doDeath(...)` (the whole point — the target survives) and
+  **does not** call `self.gotoCell(cell)` (unlike `doCombat`, the victim
+  is still occupying that cell, so relocating the attacker onto it would
+  corrupt cell/agent bookkeeping). Takes `amount` as a parameter rather
+  than reading a flat environment-wide constant like `maxCombatLoot`,
+  specifically so a caller can request exactly what it's owed (or any
+  other amount) rather than an unrelated global severity dial — no new
+  config key was needed. Written with no `Locke`- or debt-specific
+  knowledge at all (no import, no `getattr(x, "locke", ...)`, nothing),
+  so any decision model could call it for a non-lethal forced transfer,
+  exactly as `doCombat` is available to any decision model for a lethal
+  one — it just happens that only `Locke` has a use for it today.
+  *Design choice — new but minimal engine-level scaffolding, not a Locke-specific or Second-Treatise mechanic in itself; see `doForcefulDebtCollection`'s entry for how its citation supports being called this way.*
 
 ## `sugarscape.py` (single-line/single-block changes, no new methods)
 

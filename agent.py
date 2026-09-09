@@ -255,47 +255,8 @@ class Agent:
         if self.cell.environment.pollutionStart <= self.timestep <= self.cell.environment.pollutionEnd:
             self.cell.doSugarProductionPollution(sugarCollected)
             self.cell.doSpiceProductionPollution(spiceCollected)
-        self.recordLandTrespassIfOwned(sugarCollected, spiceCollected)
         self.cell.resetSugar()
         self.cell.resetSpice()
-
-    def recordLandTrespassIfOwned(self, sugarCollected, spiceCollected):
-        owners = getattr(self.cell, "owners", None)
-        if not owners or self in owners or not any(owner.isAlive() == True for owner in owners):
-            return
-        territoryGovernment = None
-        for owner in owners:
-            ownerLocke = getattr(owner, "locke", None)
-            if ownerLocke is not None and owner.isAlive() == True and ownerLocke["government"] is not None:
-                territoryGovernment = ownerLocke["government"]
-                break
-        selfLocke = getattr(self, "locke", None)
-        selfIsMember = selfLocke is not None and selfLocke["government"] is territoryGovernment
-        if territoryGovernment is not None and not selfIsMember:
-            landUse = next(iter(territoryGovernment)).locke["governmentLandUse"]
-            harvested = sugarCollected + spiceCollected
-            toll = harvested * landUse if landUse != "closed" else 0
-            if landUse != "closed" and toll > 0 and self.sugar + self.spice >= toll:
-                paidSugar = min(max(0.0, self.sugar), toll)
-                paidSpice = toll - paidSugar
-                self.sugar -= paidSugar
-                self.spice -= paidSpice
-                for owner, share in owners.items():
-                    owner.sugar += paidSugar * share
-                    owner.spice += paidSpice * share
-                if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} pays a land-use toll of {round(toll, 2)} to harvest in government territory at ({self.cell.x},{self.cell.y})")
-                return
-        if not hasattr(self.cell, "pendingViolations"):
-            self.cell.pendingViolations = []
-        self.cell.pendingViolations.append({"trespasser": self, "cell": self.cell,
-                                             "amount": sugarCollected + spiceCollected,
-                                             "timestep": self.timestep, "owners": dict(owners)})
-        if "all" in self.debug or "agent" in self.debug:
-            print(f"Agent {self.ID} trespasses on claimed cell ({self.cell.x},{self.cell.y}), harvesting {round(sugarCollected + spiceCollected, 2)}")
-        for other in self.cell.findNeighborAgents():
-            if hasattr(other, "resetTrustIn"):
-                other.resetTrustIn(self)
 
     def defaultOnLoan(self, loan):
         for creditor in self.socialNetwork["creditors"]:
@@ -331,6 +292,20 @@ class Agent:
             elif sugarscape.experimentalGroup != None and prey.isInGroup(sugarscape.experimentalGroup, True):
                 self.combatWithControlGroup += 1
         self.gotoCell(cell)
+
+    def doSteal(self, cell, amount):
+        prey = cell.agent
+        if prey == None or prey == self or amount <= 0:
+            return (0, 0)
+        preySugar = max(0, prey.sugar)
+        preySpice = max(0, prey.spice)
+        sugarLoot = min(amount, preySugar)
+        spiceLoot = min(amount - sugarLoot, preySpice)
+        self.sugar += sugarLoot
+        self.spice += spiceLoot
+        prey.sugar -= sugarLoot
+        prey.spice -= spiceLoot
+        return (sugarLoot, spiceLoot)
 
     def doDeath(self, causeOfDeath="unknown"):
         # TODO: Determine why some agents do not die cleanly (Sugarscape object needs to call their doDeath method)
