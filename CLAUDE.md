@@ -79,16 +79,19 @@ class; a government is a bare `set()` of member agents).
 
 ### Recurring patterns
 
-- **Seven founding votes** (`voteGovernmentForm`, `voteReparationRate`,
-  `voteLandUse`, `voteRedistribution`, `voteExecutor`, `votePayFraction`,
+- **Six founding votes** (`voteGovernmentForm`, `voteReparationRate`,
+  `voteRedistribution`, `voteExecutor`, `votePayFraction`,
   `voteLevyFraction`), voted in `attemptGovernmentFormation`, stored per
-  member (`governmentForm` / `governmentRate` / `governmentLandUse` /
+  member (`governmentForm` / `governmentRate` /
   `governmentRedistribution` / `governmentExecutor` /
   `governmentExecutorPay` / `governmentLevyFraction`), copied onto
   joiners in `addToGovernment` (§97) with no re-vote triggered by an
-  ordinary join (see the reconvening-interval bullet below).
+  ordinary join (see the reconvening-interval bullet below). (A seventh,
+  `voteLandUse` — a toll-vs-`"closed"` policy — was removed; every
+  non-owner harvest on owned land is now unconditionally a trespass debt,
+  see the recurring-pattern bullet on the expected-cost value function.)
   `voteGovernmentForm` runs first and decides `findLegislature` — who
-  actually casts the other six votes (full membership under
+  actually casts the other five votes (full membership under
   `"democracy"` or the literal config sentinel
   `environmentLandLegislatureSize: "all"`, which forces `"democracy"`
   unconditionally regardless of the vote outcome; the top-K landholders
@@ -102,7 +105,7 @@ class; a government is a bare `set()` of member agents).
   its reference population rather than the (possibly size-1, under
   monarchy) legislature — a size-1 reference collapses every quantile
   breakpoint to that one value, always producing the mildest choice
-  regardless of actual wealth. `voteReparationRate`, `voteLandUse`, and
+  regardless of actual wealth. `voteReparationRate` and
   `voteGovernmentForm` itself are frozen at founding (§149 — dissolution
   — is the only way a government's form ever changes); `voteRedistribution`,
   `voteExecutor`, `votePayFraction`, and `voteLevyFraction` are re-voted
@@ -139,11 +142,12 @@ class; a government is a bare `set()` of member agents).
 - **Rare-mechanism findings**: `executorGrievance` and `restrained` are
   coherent and scratch-tested but seldom fire in practice. Treat that
   rarity as a Lockean result (§225/§230 — rebellion is a last resort), not
-  a bug to force. (`restrained` briefly became permanently unreachable and
-  was removed outright mid-session, when debt collection went through a
-  lethal `doCombat`-based design that let no debtor survive to be
-  restrained — restored once collection moved to the non-lethal `doSteal`;
-  see the debt-collection bullet below.)
+  a bug to force. (`restrained` has churned: briefly removed as dead code
+  under a lethal `doCombat`-based debt collection that let no debtor
+  survive to be restrained, restored with the non-lethal `doSteal`, then
+  its *effect* changed — it's no longer a hardcoded avoid-all-foreign-land
+  override, just one weighted term in `findEthicalValueOfCell`'s
+  expected-cost sum. The field and its setter are unchanged throughout.)
 - **Fixed finding: movement valuation ignored the toll-paying lawful-access
   path, suppressing reproduction enough to tip marginal populations into
   extinction**. `findEthicalValueOfCell` used to score *every* foreign
@@ -173,6 +177,9 @@ class; a government is a bare `set()` of member agents).
   demographic parameters (`agentReplacements: 0`, tight fertility
   windows) already put even the `"none"` baseline in a boom-or-bust
   regime with real extinction odds and no Locke mechanics involved.
+  *(Superseded: the toll mechanic this fix was about no longer exists —
+  `findEthicalValueOfCell` is now a benefit-minus-expected-cost sum, see
+  the value-function bullet below. Kept as history.)*
 - **Negative result: strengthening the "enough, and as good" proviso to
   also check neighbors' vision (`leavesEnoughForNeighbors`) did not
   measurably help.** Extinction stayed effectively unchanged (100/100 on
@@ -224,20 +231,18 @@ class; a government is a bare `set()` of member agents).
   in aggregate than one where they simply starve without those
   liabilities — even though the override clearly helped the individual
   agent survive that one timestep.
-- **Added: consent-based co-ownership grants (`doLandConsentGrants`),
-  motivated by guarding against decay.** Once a claim has gone unharvested
-  for more than half of `environmentLandDecayTimesteps`, its owner looks
-  for the most-trusted cell-adjacent neighbor (same bar as founding a
-  government) who isn't already an owner and is below their own
-  `environmentLandMaxClaimsPerAgent`, and splits the cell evenly with
-  them if one exists. A cell with two owners only decays if *neither*
-  ever tends it, since either one harvesting resets the shared
-  `lastHarvestedTimestep` — the actual mechanism this is meant to
-  exploit for survival, per the user's own framing. Grounded in Sect. 28
-  (an owner's standing to dispose of what's his by consent) and Sect. 38
-  (the same non-use/spoilage risk `processLandAbandonment` already
-  enforces) — the split ratio and the risk-based trigger point are design
-  choices, since Locke specifies neither.
+- **Added, then removed: consent-based co-ownership grants
+  (`doLandConsentGrants`).** Originally: once a claim had gone unharvested
+  for more than half of `environmentLandDecayTimesteps`, its owner
+  granted the most-trusted cell-adjacent neighbor (same trust bar as
+  founding a government, and below their own claims cap) an even
+  co-ownership share, hedging against the claim decaying to non-use since
+  a co-owned cell only decays if *neither* owner ever tends it. Grounded
+  in Sect. 28 (disposing of one's property by consent) and Sect. 38
+  (spoilage risk), split ratio and trigger both flagged as design
+  choices. **Removed by request.** Co-ownership survives via
+  `doInheritance` (splitting a deceased owner's claim among heirs); only
+  this voluntary trust-based path to creating it is gone.
 - **Combined verification (toll valuation + neighbor-vision proviso +
   claims cap + desperation + consent grants) — 100-seed run, `"locke"`
   population, timestep 500: 67/100 survived** (median final population
@@ -337,6 +342,29 @@ class; a government is a bare `set()` of member agents).
   noise band every version of this method has landed in across several
   same-seed reruns this session — no version has ever been shown to
   differ from another beyond that noise.
+- **Redesigned: `findEthicalValueOfCell` is now benefit-minus-expected-cost,
+  and the toll/`"closed"` land-use vote is gone entirely.** `findEthicalValueOfCell`
+  used to be hardcoded overrides — a flat `-(sugar+spice)-1` for a
+  `restrained` agent, a `* (1 - landUse)` toll discount for lawful paid
+  entry, a flat `0` for everything else. Now: `cellValue = sugar + spice -
+  findExpectedViolationCost(cell, owners)`, where the cost is an additive
+  sum of four weighted terms (`environmentLand*CostWeight` keys) — owner
+  count, whether the land is governed at all, the owner's reparation rate,
+  and the agent's own `restrained` status. Deliberately reads **nothing**
+  an agent couldn't plausibly know: no executor-presence check, no
+  government-size check — a Locke agent is blind to another government's
+  internal enforcement capacity (the real `doForcefulDebtCollection` still
+  only works where an executor exists; this is only about ex-ante belief).
+  `restrained` is folded in as one weighted term, not a separate override
+  — its field/setter are unchanged, but it no longer *guarantees*
+  avoidance: enough food outweighs it. `voteLandUse`/`governmentLandUse`/
+  `environmentLandUseChoices` and the whole toll-vs-`"closed"` concept are
+  removed (the vote had collapsed into a proxy for government size, per a
+  user-reported finding); `recordLandTrespassIfOwned` now makes *every*
+  non-owner harvest on owned land a trespass debt, with compensated access
+  happening only after the fact via `settleDebtsVoluntarily`. Also removed
+  in the same change: `doLandConsentGrants`, `territoryGovernmentFor`.
+  Six founding votes now, not seven.
 
 ## Config plumbing (load-bearing gotcha)
 

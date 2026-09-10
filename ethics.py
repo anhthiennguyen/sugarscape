@@ -557,7 +557,7 @@ class Locke(agent.Agent):
         self.locke = {"claims": [], "debtsReceivable": [], "trust": {},
                        "trustThreshold": random.randint(thresholdRange[0], thresholdRange[1]),
                        "government": None, "governmentRate": None, "restrained": False,
-                       "governmentLandUse": None, "governmentRedistribution": None,
+                       "governmentRedistribution": None,
                        "grievance": 0.0, "lastHarvest": 0.0, "lastLevyTimestep": -1,
                        "governmentExecutor": None, "executorGrievance": 0.0,
                        "governmentExecutorPay": None, "governmentForm": None,
@@ -570,7 +570,6 @@ class Locke(agent.Agent):
     def doGovernment(self):
         self.doForcefulDebtCollection()
         self.doTrustAccrual()
-        self.doLandConsentGrants()
         self.doGovernanceReview()
 
     def doProperty(self):
@@ -581,29 +580,6 @@ class Locke(agent.Agent):
         owners = getattr(self.cell, "owners", None)
         if not owners or self in owners or not any(owner.isAlive() == True for owner in owners):
             return
-        territoryGovernment = None
-        for owner in owners:
-            ownerLocke = getattr(owner, "locke", None)
-            if ownerLocke is not None and owner.isAlive() == True and ownerLocke["government"] is not None:
-                territoryGovernment = ownerLocke["government"]
-                break
-        selfLocke = getattr(self, "locke", None)
-        selfIsMember = selfLocke is not None and selfLocke["government"] is territoryGovernment
-        if territoryGovernment is not None and not selfIsMember:
-            landUse = next(iter(territoryGovernment)).locke["governmentLandUse"]
-            harvested = sugarCollected + spiceCollected
-            toll = harvested * landUse if landUse != "closed" else 0
-            if landUse != "closed" and toll > 0 and self.sugar + self.spice >= toll:
-                paidSugar = min(max(0.0, self.sugar), toll)
-                paidSpice = toll - paidSugar
-                self.sugar -= paidSugar
-                self.spice -= paidSpice
-                for owner, share in owners.items():
-                    owner.sugar += paidSugar * share
-                    owner.spice += paidSpice * share
-                if "all" in self.debug or "agent" in self.debug:
-                    print(f"Agent {self.ID} pays a land-use toll of {round(toll, 2)} to harvest in government territory at ({self.cell.x},{self.cell.y})")
-                return
         if not hasattr(self.cell, "pendingViolations"):
             self.cell.pendingViolations = []
         self.cell.pendingViolations.append({"trespasser": self, "cell": self.cell,
@@ -642,20 +618,24 @@ class Locke(agent.Agent):
             return None
         return min(collectible, key=lambda debt: debt["createdTimestep"])["debtor"]
 
+    def findExpectedViolationCost(self, cell, owners):
+        configuration = self.cell.environment.sugarscape.configuration
+        representative = next(iter(owners))
+        representativeLocke = getattr(representative, "locke", None)
+        government = representativeLocke.get("government") if representativeLocke is not None else None
+        rate = representativeLocke.get("governmentRate") if representativeLocke is not None else None
+        if rate is None:
+            rate = min(configuration["environmentLandReparationRateChoices"])
+        return (configuration["environmentLandOwnerCountCostWeight"] * len(owners)
+                + configuration["environmentLandGovernmentCostWeight"] * (1 if government is not None else 0)
+                + configuration["environmentLandReparationRateCostWeight"] * rate
+                + configuration["environmentLandRestrainedCostWeight"] * (1 if self.locke["restrained"] == True else 0))
+
     def findEthicalValueOfCell(self, cell, pursuitTarget=None):
         cellValue = cell.sugar + cell.spice
         owners = self.cellOwners(cell)
         if len(owners) > 0 and self not in owners and any(owner.isAlive() == True for owner in owners):
-            if self.locke["restrained"] == True:
-                cellValue = -(cell.sugar + cell.spice) - 1
-            else:
-                territoryGovernment = self.territoryGovernmentFor(cell)
-                isMember = territoryGovernment is not None and self.locke["government"] is territoryGovernment
-                landUse = None if territoryGovernment is None else next(iter(territoryGovernment)).locke["governmentLandUse"]
-                if territoryGovernment is not None and not isMember and landUse is not None and landUse != "closed":
-                    cellValue = cellValue * (1 - landUse)
-                else:
-                    cellValue = 0
+            cellValue = cellValue - self.findExpectedViolationCost(cell, owners)
         if pursuitTarget is not None:
             configuration = self.cell.environment.sugarscape.configuration
             weight = configuration["environmentLandExecutorPursuitWeight"]
@@ -712,33 +692,6 @@ class Locke(agent.Agent):
         self.convertViolationsToDebts(cell, self.timestep)
         if "all" in self.debug or "agent" in self.debug:
             print(f"Agent {self.ID} returns to co-owned cell ({cell.x},{cell.y})")
-
-    def doLandConsentGrants(self):
-        configuration = self.cell.environment.sugarscape.configuration
-        decayThreshold = configuration["environmentLandDecayTimesteps"]
-        maxClaims = configuration["environmentLandMaxClaimsPerAgent"]
-        riskThreshold = decayThreshold / 2
-        for claimedCell in list(self.locke["claims"]):
-            owners = self.cellOwners(claimedCell)
-            if self not in owners:
-                continue
-            if self.timestep - claimedCell.lastHarvestedTimestep < riskThreshold:
-                continue
-            candidates = [neighbor for neighbor in self.cell.findNeighborAgents()
-                          if neighbor.isAlive() and neighbor not in owners
-                          and getattr(neighbor, "locke", None) is not None
-                          and len(neighbor.locke["claims"]) < maxClaims
-                          and self.locke["trust"].get(neighbor.ID, 0) >= self.locke["trustThreshold"]]
-            if len(candidates) == 0:
-                continue
-            newCoOwner = max(candidates, key=lambda neighbor: self.locke["trust"].get(neighbor.ID, 0))
-            evenShare = 1.0 / (len(owners) + 1)
-            for owner in owners:
-                owners[owner] = evenShare
-            owners[newCoOwner] = evenShare
-            newCoOwner.locke["claims"].append(claimedCell)
-            if "all" in self.debug or "agent" in self.debug:
-                print(f"Agent {self.ID} grants Agent {newCoOwner.ID} co-ownership of cell ({claimedCell.x},{claimedCell.y}) to guard it against decay (Sect. 28)")
 
     def processLandAbandonment(self):
         configuration = self.cell.environment.sugarscape.configuration
@@ -1004,7 +957,6 @@ class Locke(agent.Agent):
             form = "democracy"
         legislature = self.findLegislature(founders, form)
         rate = self.voteReparationRate(legislature)
-        landUse = self.voteLandUse(legislature)
         redistribution = self.voteRedistribution(legislature, founders)
         executor = self.voteExecutor(legislature)
         pay = self.votePayFraction(legislature, executor)
@@ -1014,7 +966,6 @@ class Locke(agent.Agent):
             founder.locke["governmentForm"] = form
             founder.locke["governmentLegislature"] = legislature
             founder.locke["governmentRate"] = rate
-            founder.locke["governmentLandUse"] = landUse
             founder.locke["governmentRedistribution"] = redistribution
             founder.locke["governmentExecutor"] = executor
             founder.locke["governmentExecutorPay"] = pay
@@ -1026,7 +977,7 @@ class Locke(agent.Agent):
             executorIDs = sorted(member.ID for member in executor)
             legislatureIDs = sorted(member.ID for member in legislature)
             print(f"Agent {self.ID} and Agent {other.ID} found a new {form} government "
-                  f"(legislature {legislatureIDs}, reparation rate {rate}, land use {landUse}, "
+                  f"(legislature {legislatureIDs}, reparation rate {rate}, "
                   f"redistribution {redistribution}, executor(s) {executorIDs}, executor pay {pay}, "
                   f"levy fraction {levyFraction}) after mutual trust crosses both thresholds")
 
@@ -1067,7 +1018,6 @@ class Locke(agent.Agent):
         newMember.locke["government"] = government
         existingMember = next(member for member in government if member is not newMember)
         newMember.locke["governmentRate"] = existingMember.locke["governmentRate"]
-        newMember.locke["governmentLandUse"] = existingMember.locke["governmentLandUse"]
         newMember.locke["governmentRedistribution"] = existingMember.locke["governmentRedistribution"]
         newMember.locke["governmentExecutor"] = existingMember.locke["governmentExecutor"]
         newMember.locke["governmentExecutorPay"] = existingMember.locke["governmentExecutorPay"]
@@ -1080,24 +1030,6 @@ class Locke(agent.Agent):
         if "all" in self.debug or "agent" in self.debug:
             memberIDs = sorted(member.ID for member in government)
             print(f"Agent {newMember.ID} joins an existing government (no re-founding, members: {memberIDs})")
-
-    def voteLandUse(self, members):
-        configuration = self.cell.environment.sugarscape.configuration
-        choices = list(reversed(configuration["environmentLandUseChoices"]))
-        reference = configuration["environmentLandReparationStakeReference"]
-        preferred = []
-        for member in members:
-            stake = min(1.0, len(member.locke["claims"]) / reference) if reference > 0 else 0.0
-            preferred.append(choices[round(stake * (len(choices) - 1))])
-        preferred.sort(key=choices.index)
-        return preferred[(len(preferred) - 1) // 2]
-
-    def territoryGovernmentFor(self, cell):
-        for owner in getattr(cell, "owners", {}):
-            ownerLocke = getattr(owner, "locke", None)
-            if ownerLocke is not None and owner.isAlive() and ownerLocke["government"] is not None:
-                return ownerLocke["government"]
-        return None
 
     def voteExecutor(self, members):
         configuration = self.cell.environment.sugarscape.configuration
@@ -1253,7 +1185,6 @@ class Locke(agent.Agent):
             government.discard(self)
             self.locke["government"] = None
             self.locke["governmentRate"] = None
-            self.locke["governmentLandUse"] = None
             self.locke["governmentRedistribution"] = None
             self.locke["governmentExecutor"] = None
             self.locke["governmentExecutorPay"] = None
@@ -1301,7 +1232,6 @@ class Locke(agent.Agent):
         for survivor in list(government):
             survivor.locke["government"] = None
             survivor.locke["governmentRate"] = None
-            survivor.locke["governmentLandUse"] = None
             survivor.locke["governmentRedistribution"] = None
             survivor.locke["governmentExecutor"] = None
             survivor.locke["governmentExecutorPay"] = None

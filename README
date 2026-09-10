@@ -465,6 +465,11 @@ environmentLandExecutorPursuitWeight: float
     Note: Only relevant to the "locke" decision model.
     Default: 0.5
 
+environmentLandGovernmentCostWeight: float
+    Set how much a Locke agent's movement valuation of a foreign-owned cell is reduced by the land being part of an organized government at all (a flat penalty applied once when any owner belongs to a government, regardless of that government's size or enforcement activity, which a Locke agent is treated as unable to observe). One of four additive weighted terms in findEthicalValueOfCell's expected-cost formula: cellValue = sugar + spice - (ownerCountWeight * numOwners + governmentCostWeight * isGoverned + reparationRateCostWeight * reparationRate + restrainedCostWeight * isRestrained).
+    Note: Only relevant to the "locke" decision model.
+    Default: 2.0
+
 environmentLandGrievanceDecay: float
     Set the multiplier (0 to 1) applied to every member's grievance when a government re-legislates its redistribution rule in response to grievance.
     Note: Only relevant to the "locke" decision model.
@@ -505,25 +510,35 @@ environmentLandMaxClaimsPerAgent: int
     Note: Only relevant to the "locke" decision model.
     Default: 1
 
+environmentLandOwnerCountCostWeight: float
+    Set how much each co-owner of a foreign-owned cell reduces a Locke agent's movement valuation of it (multiplied by the number of owners). One of four additive weighted terms in findEthicalValueOfCell's expected-cost formula - see environmentLandGovernmentCostWeight for the full formula.
+    Note: Only relevant to the "locke" decision model.
+    Default: 1.0
+
 environmentLandReparationRateChoices: [float, ...]
-    Set the menu of candidate reparation multipliers (each greater than 1.0) applied to a land trespass debt so that repayment costs the trespasser more than the amount taken. When two Locke agents found a government, each founder's own claimed-cell count is ranked by quantile against the founding pair's own distribution to pick one menu entry, and the government adopts the median of the two choices for the life of that government (favoring the milder choice on a tie); later joiners are bound to it without a re-vote. A land owner not in a government sizes debts at the smallest choice.
+    Set the menu of candidate reparation multipliers (each greater than 1.0) applied to a land trespass debt so that repayment costs the trespasser more than the amount taken. When two Locke agents found a government, each founder's own claimed-cell count is ranked by quantile against the founding pair's own distribution to pick one menu entry, and the government adopts the median of the two choices for the life of that government (favoring the milder choice on a tie); later joiners are bound to it without a re-vote. A land owner not in a government sizes debts at the smallest choice. Every harvest by a non-owner on owned land is a trespass generating such a debt - there is no lawful "pay a toll up front" alternative; compensation happens after the fact through debt settlement.
     Note: Only relevant to the "locke" decision model.
     Default: [1.25, 1.5, 2.0, 3.0]
 
+environmentLandReparationRateCostWeight: float
+    Set how much a foreign-owned cell's governing reparation rate (or the smallest menu choice if the owner has no government) reduces a Locke agent's movement valuation of it (multiplied by the rate itself). The reparation rate is a posted, voted "standing law" a Locke agent is treated as able to know, unlike a government's moment-to-moment enforcement activity. One of four additive weighted terms - see environmentLandGovernmentCostWeight for the full formula.
+    Note: Only relevant to the "locke" decision model.
+    Default: 1.0
+
 environmentLandReparationStakeReference: int
-    Set the claimed-cell count at which a Locke agent's own stake is treated as fully "landed" for votes that compare against a fixed absolute reference rather than a quantile ranking: the founding vote on governmentForm (a founder at or above this reference prefers a restricted form) and voteLandUse's toll-price preference. voteReparationRate no longer uses this reference - it ranks founders against each other by quantile instead (see environmentLandReparationRateChoices).
+    Set the claimed-cell count at which a Locke agent's own stake is treated as fully "landed" for the founding vote on governmentForm (a founder at or above this reference prefers a restricted form). voteReparationRate does not use this reference - it ranks founders against each other by quantile instead (see environmentLandReparationRateChoices).
     Note: Only relevant to the "locke" decision model.
     Default: 8
+
+environmentLandRestrainedCostWeight: float
+    Set how much a Locke agent's own "restrained" status (set after it survives a forceful debt collection) reduces its movement valuation of any foreign-owned cell (a flat penalty applied once while restrained). One of four additive weighted terms - see environmentLandGovernmentCostWeight for the full formula. Unlike the old hardcoded restrained penalty, this no longer guarantees a restrained agent avoids all foreign land: with enough food on the cell relative to the weights, a restrained agent can still rationally choose it.
+    Note: Only relevant to the "locke" decision model.
+    Default: 3.0
 
 environmentLandTrustThresholdRange: [int, int]
     Set the inclusive [min, max] range from which each Locke agent's own trust threshold is independently drawn at birth (both initial population and children born by reproduction; this value is not inherited from either parent). When two governmentless Locke agents' trust toward each other each reaches its own threshold, the two found a social contract (government); a Locke agent whose trust toward a standing government member reaches its own threshold joins that member's government on its own consent alone.
     Note: Only relevant to the "locke" decision model.
     Default: [4, 8]
-
-environmentLandUseChoices: [str | float, ...]
-    Set the menu of land-use options a Locke government votes over at founding: "closed" (a non-member's harvest in territory is a trespass with no lawful path) or a per-harvest toll fraction a non-member pays to harvest lawfully. List from strictest to most lenient. When two Locke agents found a government they hold a one-vote-each majority vote over this menu (keyed to the same claimed-cell stake used for the reparation-rate vote, environmentLandReparationStakeReference) and the government adopts the median choice, favoring the more lenient of the two on a tie; later joiners are bound to it without a re-vote. A non-member that cannot pay the toll in full trespasses instead.
-    Note: Only relevant to the "locke" decision model.
-    Default: ["closed", 0.5, 0.35, 0.2]
 
 environmentMaxCombatLoot: float
     Set the maximum reward agents receive from winning combat.

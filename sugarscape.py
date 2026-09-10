@@ -1538,7 +1538,6 @@ def verifyConfiguration(configuration):
     negativesAllowed += ["environmentAgeistAbsoluteRanges", "environmentAgeistRelativeRange", "environmentEquator", "environmentPollutionDiffusionTimeframe", "environmentPollutionTimeframe", "environmentMaxSpice", "environmentMaxSugar"]
     negativesAllowed += ["interfaceHeight", "interfaceWidth", "seed", "timesteps"]
     timeframes = ["diseaseTimeframe", "environmentPollutionDiffusionTimeframe", "environmentPollutionTimeframe"]
-    orderSignificant = ["environmentLandUseChoices"]
     negativeFlag = 0
     for configName, configValue in configuration.items():
         if isinstance(configValue, list):
@@ -1547,7 +1546,7 @@ def verifyConfiguration(configuration):
             configType = type(configValue[0])
             if configName in timeframes:
                 configuration[configName] = sortConfigurationTimeframes(configuration, configName)
-            elif configName not in orderSignificant:
+            else:
                 configValue.sort()
             if configName not in negativesAllowed and (configType == int or configType == float):
                 for i in range(len(configValue)):
@@ -1919,6 +1918,7 @@ if __name__ == "__main__":
                      "environmentLandExecutorPartialityPenalty": 0.5,
                      "environmentLandExecutorPayChoices": [0.0, 0.1, 0.2, 0.4, 0.7],
                      "environmentLandExecutorPursuitWeight": 0.5,
+                     "environmentLandGovernmentCostWeight": 2.0,
                      "environmentLandGrievanceDecay": 0.5,
                      "environmentLandGrievanceThreshold": 6.0,
                      "environmentLandLegislativeReviewInterval": 10,
@@ -1927,10 +1927,12 @@ if __name__ == "__main__":
                      "environmentLandLegislatureSize": 1,
                      "environmentLandLevyFractionChoices": [0.1, 0.3, 0.5, 0.7, 0.9],
                      "environmentLandMaxClaimsPerAgent": 1,
+                     "environmentLandOwnerCountCostWeight": 1.0,
                      "environmentLandReparationRateChoices": [1.25, 1.5, 2.0, 3.0],
+                     "environmentLandReparationRateCostWeight": 1.0,
                      "environmentLandReparationStakeReference": 8,
+                     "environmentLandRestrainedCostWeight": 3.0,
                      "environmentLandTrustThresholdRange": [4, 8],
-                     "environmentLandUseChoices": ["closed", 0.5, 0.35, 0.2],
                      "environmentMaxCombatLoot": 0,
                      "environmentMaxRaces": 0,
                      "environmentMaxSpice": 0,

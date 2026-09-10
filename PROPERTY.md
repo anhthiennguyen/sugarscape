@@ -17,10 +17,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `trust` (`{otherID: score}`), `trustThreshold` (drawn once at birth from
   `environmentLandTrustThresholdRange`), `government` (the shared `set()`, or
   `None`), `governmentRate` (the reparation multiplier its government voted),
-  `restrained` (the Sect. 12 restraint flag), `governmentLandUse`
-  (`"closed"` or a per-harvest toll fraction, one entry from
-  `environmentLandUseChoices` — the Sect. 124 rule binding non-members in the
-  territory), `governmentRedistribution` (`"equal"`/`"proportional"` — how the
+  `restrained` (the Sect. 12 restraint flag),
+  `governmentRedistribution` (`"equal"`/`"proportional"` — how the
   Sect. 138 levy is paid back out), `grievance` (`0.0`; cumulative net loss
   under `proportional`, the fuel for Sect. 240 withdrawal), `lastHarvest` (this
   timestep's gross harvest, for the levy), `lastLevyTimestep` (idempotence
@@ -47,7 +45,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   a payout-excluded subject under a restricted form, forces an early
   reconvening — a third channel, distinct from both `grievance` and
   `executorGrievance`).
-  *Design choice — bookkeeping structure, no textual analog. `trustThreshold`, `restrained`, `grievance`, `executorGrievance`, `legislatureGrievance` are all per-agent and never inherited (Sect. 116/118 for political disposition; Sect. 12 restraint and one's own grievance are personal). The government-law fields (rate, land-use, redistribution, executor, executor pay, form, legislature, levy fraction) are copied from existing members on join (Sect. 97), not from a parent.*
+  *Design choice — bookkeeping structure, no textual analog. `trustThreshold`, `restrained`, `grievance`, `executorGrievance`, `legislatureGrievance` are all per-agent and never inherited (Sect. 116/118 for political disposition; Sect. 12 restraint and one's own grievance are personal). The government-law fields (rate, redistribution, executor, executor pay, form, legislature, levy fraction) are copied from existing members on join (Sect. 97), not from a parent.*
 - **`cellOwners(self, cell)`** (`557-560`) — Lazily creates and returns
   `cell.owners` (a `{agent: share}` dict) the first time it's touched. The
   central accessor for reading ownership anywhere in the class.
@@ -108,15 +106,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   their sum as `self.locke["lastHarvest"]` every timestep — before the
   gate, so a no-harvest timestep records `0.0` and is not levied on a
   stale value — then calls `recordLandTrespassIfOwned(sugarCollected,
-  spiceCollected)` with the same snapshotted amounts, **unconditionally**
-  (even on a zero harvest, matching this call's behavior from when it
-  lived in `agent.py` — see that method's own entry). This call must come
-  after `super().collectResourcesAtCell()`, not before: the toll-payment
-  branch inside it checks `self.sugar + self.spice >= toll`, which needs
-  to already include this timestep's harvest (added by `super()`) to
-  correctly judge whether the harvest just gathered is enough to cover
-  the toll. Only *after* that does it **return immediately if nothing was
-  harvested**. Only on a non-zero harvest
+  spiceCollected)` with the same snapshotted amounts (the snapshot is
+  needed because `super()` zeroes the cell), **unconditionally** (even on
+  a zero harvest, matching this call's behavior from when it lived in
+  `agent.py` — see that method's own entry). Then it **returns
+  immediately if nothing was harvested**. Only on a non-zero harvest
   does it dispatch: claim an unclaimed cell if `self` is currently below
   `environmentLandMaxClaimsPerAgent` **and** `leavesEnoughForNeighbors`
   says the proviso is satisfied — both conditions, not either — or, if
@@ -154,8 +148,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   self-only check**: the original implementation asked only whether
   `self` had an unclaimed alternative nearby, never whether the claim
   would leave a neighbor boxed in. A 100-seed run of `config.json`'s
-  pure-`"locke"` population (with the `findEthicalValueOfCell` toll-fix
-  above already applied) still showed the large majority of seeds going
+  pure-`"locke"` population (with the era's `findEthicalValueOfCell`
+  foreign-land valuation fix already applied) still showed the large majority of seeds going
   extinct well before timestep 500, while a matched `"none"`-model
   baseline over the identical seeds went extinct in less than half as
   many; a decisive ablation — disabling claim acquisition outright while
@@ -182,47 +176,25 @@ government commit `9a70cff`); for that commit's original per-method citations se
   after a non-zero harvest (see `collectResourcesAtCell`), so an owner parked
   on an exhausted cell no longer holds the claim against `processLandAbandonment`.
   *Design choice — the specific "wait until the owner returns" timing is invented; the reparation right it triggers is grounded in Sect. 10, and the harvest gate in Sect. 38 (see `collectResourcesAtCell`). Consequence: pending violations on a claim the owner only ever revisits without gathering are not booked until someone next harvests the cell (still credited to the snapshotted victim via `convertViolationsToDebts`), or are lost if the claim decays first — consistent with an abandoning owner forfeiting the claim going forward.*
-- **`doLandConsentGrants(self)`** (`688-712`) — Runs every timestep (called
-  from `doGovernment`, alongside the other per-timestep Locke
-  passes) for every claim `self` still holds. If less than half of
-  `environmentLandDecayTimesteps` has elapsed since the cell was last
-  harvested, does nothing — the claim isn't at meaningful risk yet. Once
-  it's past that halfway point, looks among `self`'s cell-adjacent
-  neighbors for anyone `self` trusts at least as much as its own
-  `trustThreshold` (the identical bar `attemptGovernmentFormation` uses
-  for founding/joining a government) who is **not** already an owner and
-  is currently **below** `environmentLandMaxClaimsPerAgent` themselves —
-  picks the single most-trusted such neighbor, if any, and re-splits the
-  cell evenly among all current owners plus the new one, adding the cell
-  to the new co-owner's own `claims` list. **Deliberately gated on the
-  candidate's own claims cap**, the same one `collectResourcesAtCell`
-  enforces for ordinary acquisition — a consent grant is still a way of
-  coming to hold land, and letting it bypass the cap would make it a
-  backdoor around the very limit `environmentLandMaxClaimsPerAgent`
-  exists to enforce. Once granted, the new co-owner is a genuine owner
-  going forward (not a mere licensee) — `self not in owners` is now false
-  for them everywhere that matters (trespass detection, movement
-  valuation), and *either* owner independently harvesting or returning to
-  the cell resets the shared `lastHarvestedTimestep`, which is the actual
-  point: a claim with two owners only decays if *neither* of them ever
-  tends it, not if just one of them happens to wander off.
-  **Combined verification, all five fixes/additions together** (toll
-  valuation, the neighbor-vision proviso, the per-agent claims cap,
-  desperation, and this grant mechanic): a full 100-seed run of
-  `config.json`'s pure-`"locke"` population to timestep 500 came back
-  **67/100 surviving** (median final population 948, from a starting 250)
-  against **33/100 extinct** (median extinction at timestep 183) — a
-  reversal from the 94-100% extinction rate measured for each earlier,
-  partial version of this fix, and better than the matched `"none"`
-  (no-ethics) baseline's 55% survival rate over the identical 100 seeds.
-  The per-agent claims cap (see `collectResourcesAtCell` above) was
-  already shown by itself to be the dominant lever (94%→17% extinction
-  in isolation, better than baseline on its own); desperation and this
-  grant mechanic were added afterward per direct request rather than
-  as further diagnosed fixes, and were verified together with everything
-  else in this one combined run rather than each in its own isolated
-  ablation.
-  *Locke, Sect. 28: what a man has removed from the common state "he hath mixed his labour with, and joined to it something that is his own, and thereby makes it his property" — property is his to dispose of by consent, which grounds an owner's standing to share it at all; no passage licenses a specific split ratio or a specific trigger for when to share, both of which are design choices. Sect. 38 grounds the actual motivation named here — losing a claim entirely to non-use is the harm being hedged against, so sharing it with someone able to tend it when `self` cannot is a direct response to that same spoilage risk, not an unrelated added mechanic. The trust-threshold reuse (rather than a separate parameter) is a design choice — Locke gives no basis for a different bar between "trust enough to found a government with" and "trust enough to co-own one plot with," so this treats them as the same kind of judgment.*
+- **Removed: `doLandConsentGrants(self)`.** Let an owner voluntarily
+  grant a cell-adjacent, sufficiently-trusted neighbor (below their own
+  `environmentLandMaxClaimsPerAgent` cap) co-ownership of a claim that had
+  gone unharvested for more than half `environmentLandDecayTimesteps` —
+  hedging against the claim decaying entirely to non-use, since a
+  co-owned cell only decays if *neither* owner ever tends it. Grounded in
+  Sect. 28 (an owner's standing to dispose of what's his by consent) and
+  Sect. 38 (the same spoilage risk `processLandAbandonment` enforces),
+  with the split ratio and trigger point both flagged as design choices.
+  **Removed by request.** Co-ownership itself survives: `doInheritance`
+  still creates multi-owner cells by splitting a deceased owner's claim
+  among their living Locke children, and `processLandAbandonment`'s "a
+  co-owned claim doesn't decay while any one owner tends it" behavior is
+  unchanged — only the voluntary, trust-based path to *creating* that
+  co-ownership is gone. This mechanic was part of the "combined
+  verification" 100-seed run recorded under `collectResourcesAtCell`'s
+  claims-cap finding; that run's headline result (the per-agent claims
+  cap as the dominant survival lever) is unaffected by removing this
+  ancillary piece.
 - **`processLandAbandonment(self)`** (`715-729`) — Runs every timestep for
   every claim the agent holds; forfeits any cell the *owner* hasn't
   harvested in `environmentLandDecayTimesteps` steps, otherwise keeps it in
@@ -230,7 +202,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   cell does not reset this clock (see `recordLandTrespassIfOwned` above)
   — a claim under continuous theft still decays; a
   claim under **co-ownership** does not, as long as any one owner tends
-  it (see `doLandConsentGrants` above).
+  it (co-ownership now arises only through `doInheritance`, see below).
   *Locke, Sect. 38 (see `forfeitCellClaim` above) grounds losing land through non-use; the specific numeric timestep threshold (`environmentLandDecayTimesteps`) is a design choice — Locke never puts a number on it.*
 - **`settleDebtsVoluntarily(self)`** (`672-693`) — Runs every timestep; for
   every debt the agent owes, pays down as much as it can from sugar/spice
@@ -358,13 +330,13 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `other` is in a government, `self` joins it (`addToGovernment`) on its own
   consent alone. Otherwise, only if `other`'s trust toward `self` has also
   crossed `other`'s threshold, founds a new government — a bare `set()` — and
-  votes **seven** laws over the founders, in order: `voteGovernmentForm`
+  votes **six** laws over the founders, in order: `voteGovernmentForm`
   (democracy or restricted — resolved to `"monarchy"`/`"oligarchy"` by
   `environmentLandLegislatureSize`, or forced to `"democracy"` outright
   when that config is `"all"`), then `findLegislature` picks who
   actually gets a say in the rest; only then `voteReparationRate` (the
-  reparation multiplier), `voteLandUse` (closed, or a per-harvest toll
-  price), `voteRedistribution` (equal/proportional, judged against the
+  reparation multiplier),
+  `voteRedistribution` (equal/proportional, judged against the
   *whole* founding pair regardless of who's voting), `voteExecutor` (who
   collects on the society's behalf), `votePayFraction` (what the
   executor(s) are paid from the levy), and `voteLevyFraction` (the levy
@@ -392,9 +364,8 @@ government commit `9a70cff`); for that commit's original per-method citations se
   of the two holds more land) was considered and rejected: with exactly
   two founders one is always relatively dominant, so a relative rule would
   resolve every disagreement to the same label every time, making the
-  other label permanently unreachable — the same degenerate-ballot problem
-  the land-use redesign already fixed once. Reusing the founders' land
-  stake against a fixed reference avoids reintroducing it.
+  other label permanently unreachable. Reusing the founders' land
+  stake against a fixed reference avoids that.
   *Locke, Sect. 132 names all three forms as legitimate outcomes of the majority's founding choice ("may place [legislative power]... into the hands of a few select men... or else into the hands of one man... and this is a democracy, oligarchy, or a monarchy") without ranking them or supplying a decision procedure — §107 (custom) and §110 (choosing "the wisest and bravest") both describe historical drift toward monarchy but neither is mechanizable as a per-founder preference rule. Keying preference to accumulated stake is a design choice — the same stake-driven self-interest logic already used for `voteReparationRate`'s harshness scaling and `votePayFraction`'s role-conditioning, extended here to a Sect. 132 decision Locke leaves procedurally open. This vote is only ever cast by the two founders and never re-run (see "Permanence" in `reviewLegislature`'s note below) — see PROPERTY.md's phase notes for the two known consequences of that: founding legislatures are behaviorally identical between `"restricted"` and `"democracy"` whenever `environmentLandLegislatureSize ≥ 2` (top-K selection caps at the 2 founders regardless of K), and the founding-form split is expected to skew heavily toward one label rather than balance.*
 - **`findLegislature(self, members, form)`** (`947-953`) — Returns
   `frozenset(members)` for `"democracy"`; otherwise sorts `members`
@@ -448,26 +419,24 @@ government commit `9a70cff`); for that commit's original per-method citations se
   degeneracies (the K≥2 founding-legislature finding under
   `voteGovernmentForm`, the milder-wins tie-break every menu vote shares)
   rather than re-engineering around every one.
-  *Locke, Sect. 12 gives only a floor ("an ill bargain"), not a number, so the rate is set by collective decision. Sect. 95-96: one equal vote each, the body moving "whither the greater force carries it, which is the consent of the majority" — hence the median. Sect. 138 grounds keying the preference to holdings, though under this mechanism that's now relative standing within the founding pair, not absolute holdings. The choice menu remains a design choice; `environmentLandReparationStakeReference` no longer grounds this vote specifically (see that key's README entry — it still grounds `voteGovernmentForm` and `voteLandUse`).*
-- **`voteLandUse(self, members)`** (`779-788`) — The Sect. 124 standard binding
-  non-members in the territory: a single vote over `environmentLandUseChoices`
-  (strictest to most lenient, `"closed"` first), structurally identical to
-  `voteReparationRate` — each member's preferred option is one entry from the
-  menu (read strict-to-lenient, then internally worked lenient-to-strict to
-  match the reparation vote's ascending-severity convention), picked by
-  `round(min(1.0, claims / environmentLandReparationStakeReference) *
-  (len(choices) - 1))`. The government adopts the median of the members'
-  preferred options (the more lenient of the two middle choices for an even
-  count). Voted once at formation, never re-legislated — Sect. 153's
-  "legislated once" story holds for it. Replaces the earlier two-law design
-  (a `"closed"`/`"toll"` binary plus a fixed `environmentLandUseTollFactor`
-  price) — that binary made land-use policy a law with only one value it ever
-  actually took across every founding (`"toll"`, invariably), which is not a
-  meaningful standard under Sect. 124; folding price into the same vote gives
-  the community a real, varying choice, and removes the second law's
-  dependency on the first ("the toll factor only matters if land-use is
-  toll").
-  *Locke, Sect. 119: one who enjoys "any part of the dominions of any government... is thereby bound to obey the laws of that government." The territory (union of members' claims) is the dominion, so a government can bind a non-member standing in it; a chosen price is a lawful path, `"closed"` makes a non-member's harvest categorically a trespass. Sect. 124 (government exists to protect property under "a standing rule") grounds this being a rule, not just a penalty. Sect. 12 gives reparation a floor, but nothing in Chapter VIII or IX characterizes what a toll condition should be — Sect. 96's majority-decides principle is the strongest fit precisely because the text is silent on the number: the community sets it, same as the reparation multiplier. Reusing `environmentLandReparationStakeReference` (rather than a dedicated constant) is a design choice — both votes key off the same "claimed-cell stake" concept.*
+  *Locke, Sect. 12 gives only a floor ("an ill bargain"), not a number, so the rate is set by collective decision. Sect. 95-96: one equal vote each, the body moving "whither the greater force carries it, which is the consent of the majority" — hence the median. Sect. 138 grounds keying the preference to holdings, though under this mechanism that's now relative standing within the founding pair, not absolute holdings. The choice menu remains a design choice; `environmentLandReparationStakeReference` no longer grounds this vote specifically (see that key's README entry — it now grounds only `voteGovernmentForm`).*
+- **Removed: `voteLandUse(self, members)`.** Was one of the founding
+  votes: a single vote over a menu of `"closed"` or a per-harvest toll
+  fraction, setting `governmentLandUse` — the standing rule (Sect.
+  119/124) binding non-members in the territory. **Removed by request,
+  along with the whole toll/`"closed"` concept.** The problem it had:
+  keyed purely to a member's own claim count (bigger landholder → more
+  exclusion), the vote's practical meaning had collapsed into a proxy
+  for government size rather than the actual Lockean question of whether
+  compensated access beats total exclusion. Rather than redesign the
+  vote's inputs, the toll mechanic is gone entirely: every non-owner
+  harvest on owned land is now a trespass generating a reparation debt at
+  the owner's `governmentRate` (unchanged — `convertViolationsToDebts`),
+  collectible via the existing executor/`doSteal` machinery and payable
+  after the fact via `settleDebtsVoluntarily` — which is the compensated
+  access "toll" used to provide, just always retrospective rather than
+  paid up front. `governmentLandUse` and `environmentLandUseChoices` are
+  removed from all plumbing.
 - **`voteRedistribution(self, votingMembers, allMembers)`** (`1052-1055`) —
   The contested law: how the per-timestep levy is paid back out. The
   comparison mean is computed over `allMembers` — the *whole* government,
@@ -487,7 +456,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   by construction, so this is provably identical to the pre-Phase-5
   formula.
   *Locke, Sect. 138/139: "the supreme power cannot take from any man any part of his property without his own consent" — the levy is exactly that, a taking the aggrieved minority did not consent to. `"equal"` returns each member its own levy (the power held, not abused); `"proportional"` moves value from the land-poor to the land-rich — Sect. 199, power "to his own private separate advantage." So this is Lockean not as legitimate legislation (Sect. 140 taxation funds operations; this funds nothing) but as the wrong of Sect. 222 ("they endeavour to take away, and destroy the property of the people"), which forfeits trust and licenses withdrawal (Sect. 240). Comparing the legislator against the whole governed body is the textually precise reading of Sect. 138's actual worry — a legislature "variable" or not, "having a distinct interest from the rest of the community" is exactly "holds more than the community it governs, on average"; the legislature's own internal mean cannot measure that once the legislature is a strict subset. The mean-relative vote and the whole levy amount remain design choices.*
-- **`voteExecutor(self, members)`** (`960-964`) — The fourth of five founding
+- **`voteExecutor(self, members)`** (`960-964`) — The fourth of six founding
   laws (Sect. 126). Preference does **not** track landholding — §126's defect is
   inability to *reach* the transgressor, so the pick is the top
   `environmentLandExecutorCount` members (clamped to at least 1, at most
@@ -502,7 +471,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
 - **`votePayFraction(self, members, executor)`** (`980-985`) — The fifth
   founding law: how much of the levy pool the executor(s) are paid, one
   entry from `environmentLandExecutorPayChoices`. Unlike the other menu
-  votes (`voteReparationRate`/`voteLandUse`), preference here isn't
+  votes (`voteReparationRate`), preference here isn't
   stake-scaled — it's purely role-based: a member currently *in* `executor`
   prefers the highest choice on the menu, everyone else prefers the lowest.
   The government adopts the median (lower of the two middle choices on a
@@ -517,7 +486,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
 - **`addToGovernment(self, government, newMember)`** (`990-1006`) — Adds
   `newMember` to the shared `set()`, points their `locke["government"]` at it,
   copies every standing government-law field onto them verbatim —
-  `governmentRate` / `governmentLandUse` / `governmentRedistribution` /
+  `governmentRate` / `governmentRedistribution` /
   `governmentExecutor` / `governmentExecutorPay` / `governmentForm` /
   `governmentLegislature` / `governmentLevyFraction` /
   `lastLegislativeReviewTimestep` — zeros their `grievance` and
@@ -592,13 +561,15 @@ government commit `9a70cff`); for that commit's original per-method citations se
   result as `governmentLevyFraction`, which `runLevyPass` reads directly
   in place of a flat config constant.
   *Sect. 138/140 (see `runLevyPass` above) ground the substance of what's being voted; the quantile mechanism itself is `voteByQuantileBracket`'s, grounded there. That the reference population differs from `voteReparationRate`'s (whole government here, just the founders there) is a design choice forced by the structural difference between a law re-voted across a growing body and one decided once at founding with no larger population yet to reference.*
-- **`territoryGovernmentFor(self, cell)`** (`965-975`) — Returns the `set()`
-  government of the first living owner of `cell` that belongs to one, else
-  `None`. Derived, not stored — territory moves as claims are made and decay.
-  *Locke, Sect. 119: the dominion is the members' land.*
+- **Removed: `territoryGovernmentFor(self, cell)`.** Returned the `set()`
+  government of a cell's first governed living owner (else `None`). Its
+  only caller was `findEthicalValueOfCell`'s toll/membership branch, which
+  is gone (see that entry and `voteLandUse`'s removal above); the new
+  expected-cost formula reads a representative owner's government status
+  inline instead. Deleted rather than left as dead code.
 - **`dissolveGovernmentIfUnviable(self, government)`** (`1226-1242`) — If fewer
   than two members remain, nulls every survivor's
-  `government`/`governmentRate`/`governmentLandUse`/`governmentRedistribution`/`governmentExecutor`/`governmentExecutorPay`/`governmentForm`/`governmentLegislature`/`governmentLevyFraction`/`lastLegislativeReviewTimestep`,
+  `government`/`governmentRate`/`governmentRedistribution`/`governmentExecutor`/`governmentExecutorPay`/`governmentForm`/`governmentLegislature`/`governmentLevyFraction`/`lastLegislativeReviewTimestep`,
   zeros their `grievance`, `executorGrievance`, and `legislatureGrievance`,
   clears the set. Trust scores persist. Called from `doInheritance` (death)
   and `doGovernanceReview` (withdrawal).
@@ -706,8 +677,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   under the same gating — skipped exactly when the agent died to
   metabolism this timestep) that the ordinary base `doTrading()` call
   immediately precedes. Runs the land-specific per-timestep passes in
-  order: forceful collection, trust accrual, consent-based co-ownership
-  grants (`doLandConsentGrants`), and `doGovernanceReview` (executor
+  order: forceful collection, trust accrual, and `doGovernanceReview` (executor
   neglect + levy + withdrawal + re-legislation + executor replacement).
   Locke no longer overrides `doTrading` itself — ordinary trading runs
   unmodified via the base class, and this hook carries only the
@@ -757,76 +727,67 @@ government commit `9a70cff`); for that commit's original per-method citations se
   dissolution (<2 members) was unaffected either way (~41.2 vs. ~40.2/seed).
   Plausible mechanism, not independently confirmed by further
   instrumentation: a desperate trespass still creates a violation debt
-  when the land isn't a paid-toll territory, and unconditionally resets
+  and unconditionally resets
   every witnessing neighbor's trust in the trespasser
   (`recordLandTrespassIfOwned`'s trailing block) — a population where
   starving agents periodically incur debt and wreck their own trust
   standing this way seems to end up *less* resilient in aggregate than
   one where they simply starve without those liabilities, even though the
   override clearly helps the individual agent survive that one timestep.
+- **`findExpectedViolationCost(self, cell, owners)`** (`~621-631`) — The
+  cost half of the movement valuation: what a Locke agent expects
+  harvesting this foreign-owned cell to cost it, as an additive sum of
+  four weighted terms, each a factor the agent could plausibly know about
+  the land without god's-eye access to another government's internal
+  state:
+  - `environmentLandOwnerCountCostWeight * len(owners)` — more co-owners,
+    more people who could notice or pursue.
+  - `environmentLandGovernmentCostWeight * (1 if the cell's representative
+    owner belongs to a government else 0)` — organized/governed land vs. a
+    lone individual's claim. Reads only the binary "is it governed," never
+    the government's size or whether it has an executor.
+  - `environmentLandReparationRateCostWeight * rate`, where `rate` is the
+    representative owner's `governmentRate` (or `min(environmentLandReparationRateChoices)`
+    if that owner has no government) — the posted, voted "standing law"
+    severity of the debt if caught.
+  - `environmentLandRestrainedCostWeight * (1 if self.locke["restrained"]
+    else 0)` — the agent's own catch history.
+  `representative` is `next(iter(owners))` for the government/rate terms —
+  the same "first owner stands in for the cell's political status" idiom
+  the deleted `territoryGovernmentFor` used. For a cell co-owned across
+  *different* governments (rare, only via `doInheritance` splitting a
+  claim among heirs who later join different bodies), the government/rate
+  terms follow whichever owner happens to be first — a deliberate
+  simplification, not a per-owner sum.
+  *Design choice — the additive-four-term shape, the weights, and the choice of these four factors are this codebase's own construction; Locke gives no numeric theory weighing them. Per term: `howManyOwners` has no direct citation (design choice). `isItUnderAGovernment` builds on Sect. 87-89 (self-help in the state of nature gives way to a common, organized authority) — that grounds treating governed and ungoverned land as *different*, though not the specific penalty or its size. `whatIsTheReparationRate`: Sect. 12 ("sufficient to make it an ill bargain") grounds the debt; Sect. 136-137 (law must be "established, settled, known," not an arbitrary extemporary decree) grounds *why this term is legitimately knowable* to an agent ahead of time — a posted, voted rate is exactly the promulgated standing law Locke requires, unlike a government's moment-to-moment enforcement activity, which the formula deliberately never reads. `amIRestrained`: Sect. 12's restraint, a personal deterrent effect.*
 - **`findEthicalValueOfCell(self, cell, pursuitTarget=None)`** (`615-639`) —
   Computes a cell's attractiveness for the movement decision as
-  `sugar + spice`, adjusted when the cell is owned by another living agent.
-  If `self.locke["restrained"]` is set,
-  the adjusted value is always `-(sugar + spice) - 1` regardless of
-  anything else (negative, richer claims avoided harder) — a
-  restrained agent forswears foreign land entirely, unconditionally
-  (no desperation override exists any more — see `isDesperate`'s removal
-  above), even land it could otherwise lawfully pay into. **Briefly removed as
-  dead code, then restored**: while `doForcefulDebtCollection` enforced
-  via the unconditionally-lethal `doCombat`, no debtor ever survived
-  collection, so `restrained` (settable only on a survivor) could never
-  be set and this branch was removed. Once collection was redesigned
-  again to use the non-lethal `doSteal` (see that method's entry), a
-  collected-from debtor survives again, so the branch, the flag, and its
-  `__init__` initialization were all restored. Otherwise, the
-  cell's owning government (`territoryGovernmentFor`) and `self`'s own
-  membership in it decide the outcome: if `self` is **not** a member and
-  that government's `governmentLandUse` is a **toll price** (not
-  `"closed"`), the value becomes `(sugar + spice) * (1 - landUse)` — the
-  same net gain the agent would actually keep after
-  `recordLandTrespassIfOwned` charges the toll on harvest, so a
-  lawful, toll-payable cell is scored as a discounted opportunity rather
-  than a worthless one. In every other case (no government, a fellow
-  member on a co-member's own specific claim, or `"closed"` land use) the
-  value is `0`, exactly as before. An owner on their own cell is
-  unaffected either way. **Fixed finding**: before an earlier change, foreign land was
-  scored `0` unconditionally, whether the policy was `"closed"` or a
-  payable toll — the lawful toll-entry path `recordLandTrespassIfOwned`
-  already implements
-  was never actually reachable by an agent's own movement choice, since
-  the valuation never distinguished a payable toll from outright closure.
-  A 100-seed run of the current `config.json` (pure-`"locke"` population)
-  showed most seeds crashing to extinction well before timestep 500, with
-  the (then still-present) `restrained` flag and outstanding debts both
-  near zero throughout every doomed run — ruling out trespass punishment
-  or debt seizure as the
-  cause — while a matched, identical-seed comparison against the
-  `"none"` (no ethics) decision model showed Locke agents generating
-  ~40-60% as many compatible-neighbour reproduction opportunities as
-  otherwise-identical plain agents, because they were treating all
-  claimed land as absolute no-go territory instead of using the
-  toll-paying option the model already supports; several seeds that
-  recover under `"none"` reliably went extinct under `"locke"` for
-  exactly this reason. This fix measurably raises the mid-run population
-  and reproduction-opportunity count on the same seeds (see the scratch
-  tests and comparison in this change's verification), though it does not
-  fully eliminate extinction risk — the underlying `config.json`
-  demographic parameters (`agentReplacements: 0`, tight fertility
-  windows) already put even the `"none"` baseline within a
-  boom-or-bust regime, extinct in a real fraction of seeds with no Locke
-  mechanics involved at all.
-  Then, if `findBestEthicalCell` passed a
-  `pursuitTarget` (only ever non-`None` for an executor with something
-  collectible), subtracts `environmentLandExecutorPursuitWeight *`
-  Manhattan distance from the candidate cell to the target's *current* cell
-  — cells closer to the debtor score relatively higher, biasing movement
-  toward it without special-casing or overriding the exclusion/restraint/
-  toll logic above (a foreign, closed-or-member-only cell that happens to
-  be closest to the target is still `0` or negative before the pursuit
-  term applies). The executor uses the debtor's exact current position,
-  not a sensed/inferred one.
-  *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" — exclusion is the primary effect of property, grounding the `0` case (closed policy, or a member on a co-member's own plot, where no lawful entry exists at all). Sect. 119/124 ground the toll-discount case: one who enjoys "any part of the dominions of any government" under its "standing rule" may lawfully remain and pay into it — a non-member entering under a chosen toll price, rather than a closed one, is exercising exactly that lawful path already coded in `recordLandTrespassIfOwned`; valuing it at its net (post-toll) worth is what makes that lawful path a real option for a self-interested mover, not merely something that happens to work out if the agent stumbles onto it. Sect. 12: punishment serves "reparation and restraint" — the negative score for a restrained agent is the restraint half, driving a previously-collected-from agent to enter claimed land only when literally every reachable cell belongs to someone else (this restraint deliberately overrides even a payable toll — Sect. 12's restraint is a response to violation, harsher than the ordinary toll-access terms available to an agent that's never been caught). The exact discount formula (`* (1 - landUse)`) is a design choice, though a tightly constrained one — it is exactly the fraction `recordLandTrespassIfOwned` actually keeps after the toll, so any other formula would value the same lawful act inconsistently between the decision to move there and the accounting once there.*
+  `sugar + spice`, minus `findExpectedViolationCost(cell, owners)` when
+  the cell is owned by another living agent that `self` isn't one of —
+  a real benefit-minus-cost tradeoff, not a hard block. A cell `self`
+  owns, or an unowned cell, is scored at its raw `sugar + spice`
+  unchanged. **Redesigned**: this used to be a set of hardcoded
+  overrides — a flat `-(sugar + spice) - 1` for a `restrained` agent, a
+  `(sugar + spice) * (1 - landUse)` toll discount for lawful paid entry
+  into a government's territory, and a flat `0` for everything else
+  (closed policy, no government, a member on a co-member's own claim).
+  With the toll/`"closed"` concept gone (see `voteLandUse`'s removal) and
+  `restrained` folded into `findExpectedViolationCost` as one weighted
+  term rather than an override, all of that collapses to the single
+  benefit-minus-cost line. The `restrained` field, its `__init__`
+  default, and its setter in `doForcefulDebtCollection` are all
+  untouched — only its *effect* on this method changed. A real
+  consequence, deliberate: the old `restrained` branch guaranteed a
+  restrained agent avoided all foreign land; the new formula does not —
+  with enough food on the cell relative to the weights, a restrained
+  agent can now rationally choose it. Then, if `findBestEthicalCell`
+  passed a `pursuitTarget` (only ever non-`None` for an executor with
+  something collectible), subtracts `environmentLandExecutorPursuitWeight *`
+  Manhattan distance from the candidate cell to the target's *current*
+  cell — biasing movement toward the debtor without overriding the
+  expected-cost term above. The executor uses the debtor's exact current
+  position, not a sensed/inferred one.
+  *Locke, Sect. 27: a labour-made claim "excludes the common right of other men" grounds *why* a foreign-owned cell carries any cost at all. The magnitude of that cost, and the four factors it's built from, are `findExpectedViolationCost`'s (see its citation directly above). Modelling ownership as a graded expected cost rather than an absolute prohibition is a design choice — Sect. 27 establishes exclusion as property's effect, not that a self-interested outsider must treat every claim as infinitely costly to cross.*
 - **`doInheritance(self)`** (`682-717`) — Runs the base wealth-inheritance
   mechanic first, then splits/forfeits the deceased's land shares (Locke
   children co-own; otherwise the share reverts). Discharges the deceased's
@@ -862,42 +823,32 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `doGovernment`'s entry above for the equivalence argument and
   verification method against the prior `updateValues`-override design.*
 - **`recordLandTrespassIfOwned(self, sugarCollected, spiceCollected)`**
-  (`580-`) — Moved here from the base `Agent` class, where it lived as a
-  universal (not `Locke`-specific) check called unconditionally from
-  `collectResourcesAtCell`; now called directly from `Locke`'s own
-  `collectResourcesAtCell` override (see that method's entry below) —
-  `agent.py` no longer references this method at all, by name or
-  otherwise. Internally unchanged: if the cell has a living owner
-  and `self` isn't one of them, it would append a violation record to
-  `cell.pendingViolations` (with a snapshot of the `owners` dict, so the
-  eventual debt is credited to whoever was wronged then — see
-  `convertViolationsToDebts`). **Territory interception first** (Sect.
-  119): a loop over `owners` (now non-duck-typed, since `self` is
-  guaranteed to be `Locke` and `ethics.py` already has direct access to
-  its own state) finds whether the cell is in a government's territory;
-  if it is and `self` is not a member and the government's
-  `governmentLandUse` is not `"closed"`, `self` is charged
-  `harvest * governmentLandUse` (the voted price itself, paid pro rata to
-  the owners) — and if `self` can pay it in full, the harvest is lawful
-  and the method `return`s with **no violation recorded**. `"closed"`, an
-  unpayable toll, or a non-territory cell fall through to the ordinary
-  violation path. Deliberately does **not** touch `lastHarvestedTimestep`
-  — only the owner's own harvest resets the abandonment clock (in
-  `processReturnToOwnedLand`), so a claim under continuous theft still
-  decays per Locke's spoilage proviso, which is keyed to the possessor's
-  own use, not mere third-party contact with the land. **Trailing
-  block**: after the trespass debug print, a loop over
-  `self.cell.findNeighborAgents()` calls `other.resetTrustIn(self)` on any
-  neighbour that has the method — i.e. the `Locke` agents adjacent to the
-  trespassed cell, found via `hasattr` duck-typing (a non-`Locke`
-  neighbour has no `resetTrustIn`). All the trust-reset logic lives in
-  `Locke.resetTrustIn`; this is a bare notification loop. (An earlier
-  version looped over the whole living population — see `resetTrustIn`
-  for why that was scoped down to witnesses.) **Now only ever reachable
-  when `self` is `Locke`** (see the base-class entry's consequence note):
-  a non-`Locke` trespasser is never checked at all, so this method's own
-  logic is unchanged, only its callers are narrower.
-  *Sect. 119/124 ground the toll-discount case: one who enjoys "any part of the dominions of any government" under its "standing rule" may lawfully remain and pay into it. Sect. 94 grounds the notification loop's neighbours-only scope: trust is lost by those who perceive the trespass. The universal Sect. 6 grounding this method carried while it lived on `Agent` ("no one ought to harm another... in his... possessions", binding everyone) no longer applies now that only `Locke`-vs-`Locke` trespass is ever detected — see the `agent.py` section's `collectResourcesAtCell` entry for that tradeoff, made explicitly, not silently.*
+  (`~580`) — Called directly from `Locke`'s own `collectResourcesAtCell`
+  override; `agent.py` doesn't reference it at all. If the cell has a
+  living owner and `self` isn't one of them, appends a violation record
+  to `cell.pendingViolations` (with a snapshot of the `owners` dict, so
+  the eventual debt is credited to whoever was wronged then — see
+  `convertViolationsToDebts`), prints a debug line, and calls
+  `other.resetTrustIn(self)` on every cell-adjacent neighbour that has
+  the method (the `Locke` agents who witnessed it; a non-`Locke` neighbour
+  has no `resetTrustIn`). **That's the whole method now.** It used to have
+  a toll/territory interception branch first — a non-member could pay
+  `harvest * governmentLandUse` up front for a lawful harvest with no
+  violation. With `governmentLandUse` and the whole toll/`"closed"`
+  concept gone (see `voteLandUse`'s removal), *every* non-owner harvest
+  on owned land is unconditionally a violation; compensated access now
+  happens only after the fact, as reparation-debt settlement. Deliberately
+  does **not** touch `lastHarvestedTimestep` — only the owner's own
+  harvest resets the abandonment clock (in `processReturnToOwnedLand`), so
+  a claim under continuous theft still decays per Locke's spoilage
+  proviso, keyed to the possessor's own use, not mere third-party contact.
+  Only ever reachable when `self` is `Locke` (only `Locke` overrides
+  `collectResourcesAtCell` to call it); a non-`Locke` harvester on
+  Locke-claimed land is never checked at all — an explicit tradeoff
+  against the universal Sect. 6 grounding this method carried while it
+  lived on `Agent`, documented in the `agent.py` section's
+  `collectResourcesAtCell` entry.
+  *Sect. 6: "no one ought to harm another... in his... possessions" — any harvest of another's claimed land without their consent is a wrong; with no toll path, there is no consented-access carve-out left in this method. Sect. 94 grounds the notification loop's neighbours-only scope: trust is lost by those who perceive the trespass. Sect. 10/12 ground the reparation right the recorded violation triggers (in `convertViolationsToDebts`). The lost Sect. 119/124 toll-access citation is gone with the mechanic it grounded.*
 - **`spawnChild(self, childID, birthday, cell, configuration)`**
   (`1143-1144`) — Returns a new `Locke` instance for reproduction, so a
   `Locke` agent's children are also `Locke` agents by default. This is what
@@ -997,7 +948,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   above on `set()`-based nondeterminism), so no clean causal population
   effect could be isolated, only the mechanical fact that the check no
   longer fires cross-model.
-  *Design choice, explicitly weaker than the original universal version's Sect. 6 grounding — see the consequence note above. The logic itself, now living entirely under `class Locke`, keeps its own Sect. 119/124 toll citation unchanged.*
+  *Design choice, explicitly weaker than the original universal version's Sect. 6 grounding — see the consequence note above. The logic itself lives entirely under `class Locke` (see `recordLandTrespassIfOwned`'s `ethics.py` entry for its current citations).*
 - **`doCombat(self, cell)`** — Unmodified base-engine method (ordinary
   aggressive-agent combat: unconditionally kills `cell.agent`, loots up to
   the flat `maxCombatLoot` environment constant, relocates the attacker
@@ -1047,6 +998,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `"environmentLandExecutorPartialityPenalty": 0.5`,
   `"environmentLandExecutorPayChoices": [0.0, 0.1, 0.2, 0.4, 0.7]`,
   `"environmentLandExecutorPursuitWeight": 0.5`,
+  `"environmentLandGovernmentCostWeight": 2.0`,
   `"environmentLandGrievanceDecay": 0.5`,
   `"environmentLandGrievanceThreshold": 6.0`,
   `"environmentLandLegislativeReviewInterval": 10`,
@@ -1055,10 +1007,17 @@ government commit `9a70cff`); for that commit's original per-method citations se
   `"environmentLandLegislatureSize": 1`,
   `"environmentLandLevyFractionChoices": [0.1, 0.3, 0.5, 0.7, 0.9]`,
   `"environmentLandMaxClaimsPerAgent": 1`,
+  `"environmentLandOwnerCountCostWeight": 1.0`,
   `"environmentLandReparationRateChoices": [1.25, 1.5, 2.0, 3.0]`,
+  `"environmentLandReparationRateCostWeight": 1.0`,
   `"environmentLandReparationStakeReference": 8`,
-  `"environmentLandTrustThresholdRange": [4, 8]`, and
-  `"environmentLandUseChoices": ["closed", 0.5, 0.35, 0.2]`.
+  `"environmentLandRestrainedCostWeight": 3.0`, and
+  `"environmentLandTrustThresholdRange": [4, 8]`.
+  The four `*CostWeight` keys are the additive terms of
+  `findEthicalValueOfCell`'s expected-cost formula (see that entry).
+  `environmentLandUseChoices` was removed here entirely when the
+  toll/`"closed"` land-use vote was deleted — following the precedent
+  below for `environmentLandLevyFraction` and the two grace-period keys.
   Phase 6 removed three now-dead keys entirely rather than leaving them
   orphaned: `environmentLandLevyFraction` (superseded by the voted
   `environmentLandLevyFractionChoices`), `environmentLandGovernmentReviewThreshold`,
@@ -1079,16 +1038,13 @@ government commit `9a70cff`); for that commit's original per-method citations se
   it was tried, before this dict entry was added — the trust-threshold key
   was added here from the start to avoid repeating it.)
   *Design choice — Python config-plumbing; see the note on why all three dict entries are load-bearing.*
-- **`verifyConfiguration(configuration)`** (`~1534-1554`) — Adds
-  `orderSignificant = ["environmentLandUseChoices"]` and skips this function's
-  generic `configValue.sort()` for any key in it. Every other list-valued
-  config option gets blind-sorted here regardless of decision model — harmless
-  for `environmentLandReparationRateChoices` (numeric, and `voteReparationRate`
-  re-sorts it anyway) but fatal for `environmentLandUseChoices`: it mixes
-  `str` (`"closed"`) with `float`, which Python's `list.sort()` can't compare,
-  and the list's *order* is itself meaningful (index position encodes
-  strict-to-lenient rank for `voteLandUse`) — sorting it would either crash
-  every run regardless of decision model, or silently scramble the menu.
+- **`verifyConfiguration(configuration)`** (`~1534-1552`) — **Reverted**: a
+  brief `orderSignificant = ["environmentLandUseChoices"]` exemption from
+  this function's generic `configValue.sort()` was added when
+  `environmentLandUseChoices` (a mixed `str`/`float` list whose order was
+  meaningful) existed. With that key gone, the exemption and the whole
+  `orderSignificant` list are removed — the function's list-sorting loop
+  is back to its original upstream form.
   *Design choice — Python config-validation plumbing, no textual content.*
 
 ## `config.json` (`sugarscapeOptions`, value/key changes only)
@@ -1111,11 +1067,14 @@ government commit `9a70cff`); for that commit's original per-method citations se
   "top-2 of a larger roster" rather than just "both founders."
   *Design choice (the count); the appointment itself is Sect. 126 — see `voteExecutor` above.*
 - **`environmentLandReparationRateChoices: [1.25, 1.5, 2.0, 3.0]`** /
-  **`environmentLandReparationStakeReference: 8`** / **`environmentLandUseChoices:
-  ["closed", 0.5, 0.35, 0.2]`** (new keys) — Match the code defaults; the
-  reparation-rate menu, the claim count that maps to its harshest choice (also
-  the stake reference the land-use vote reuses), and the land-use menu itself.
-  *Design choice (the menus and the reference constant); the above-parity requirement is Sect. 12 and both votes are Sect. 95-96 — see `voteReparationRate` / `voteLandUse` above.*
+  **`environmentLandReparationStakeReference: 8`** (new keys) — Match the
+  code defaults; the reparation-rate menu, and the claim count that maps
+  to its harshest choice (also the stake reference `voteGovernmentForm`
+  uses). `environmentLandUseChoices` was previously set here too; it was
+  removed with the toll/`"closed"` land-use vote. The four
+  `environmentLand*CostWeight` keys are also set here, matching the code
+  defaults (`findEthicalValueOfCell`'s expected-cost weights).
+  *Design choice (the menus, the reference constant, and the cost weights); the reparation floor is Sect. 12 and the vote is Sect. 95-96 — see `voteReparationRate` above; the cost weights are `findEthicalValueOfCell`'s.*
 - **`environmentLandLegislatureSize: 1`** (new key) — Matches the code
   default; kept at the one value where the founding form vote is a real,
   present-tense choice for the founders (see `voteGovernmentForm` above) —
@@ -1297,11 +1256,11 @@ government commit `9a70cff`); for that commit's original per-method citations se
   founding pair itself; notes the documented equal-claims finding (two
   founders with identical claims, however large, always land on the
   mildest choice — no variance to rank against); Locke-only.
-  **`environmentLandReparationStakeReference` entry** (unchanged
-  citation) — Documents the stake reference, now grounding only
-  `voteGovernmentForm`'s founding-form preference and `voteLandUse` —
-  no longer `voteReparationRate`, which moved off it in Phase 6.
-  *Design choice — documentation; see `voteReparationRate` / `voteGovernmentForm` / `voteLandUse` above.*
+  **`environmentLandReparationStakeReference` entry** — Documents the
+  stake reference, now grounding **only** `voteGovernmentForm`'s
+  founding-form preference — no longer `voteReparationRate` (moved off it
+  in Phase 6) or `voteLandUse` (deleted).
+  *Design choice — documentation; see `voteReparationRate` / `voteGovernmentForm` above.*
 - **`environmentLandLegislatureSize` entry** (new, extended for Phase 6) —
   Documents the oligarchy/monarchy ruling-body size, that `1` behaves as
   monarchy and `>1` as oligarchy through one shared selection mechanism,
@@ -1313,7 +1272,7 @@ government commit `9a70cff`); for that commit's original per-method citations se
   *Design choice — documentation; see `voteGovernmentForm` / `findLegislature` above.*
 - **`environmentLandLevyFractionChoices` entry** (new, replacing the old
   `environmentLandLevyFraction` entry) — Documents the levy-fraction
-  menu and that the levy fraction is now the seventh founding law, voted
+  menu and that the levy fraction is now the sixth founding law, voted
   via the same shared quantile-bracket mechanism as reparation rate but
   with the *whole government* (never smaller than 2) as the reference
   population rather than the legislature, specifically to avoid the
@@ -1326,12 +1285,20 @@ government commit `9a70cff`); for that commit's original per-method citations se
   anything), and that it's checked alongside — not instead of — the
   "enough, and as good" proviso; Locke-only.
   *Design choice — documentation; see `collectResourcesAtCell` above.*
-- **`environmentLandUseChoices` / `environmentLandGrievanceThreshold` /
-  `environmentLandGrievanceDecay` entries** (new) — Document the land-use
-  menu and the withdrawal-grievance threshold/decay; all Locke-only. The
-  old `environmentLandGovernmentReviewThreshold` entry is gone — Phase 6
+- **`environmentLandGrievanceThreshold` /
+  `environmentLandGrievanceDecay` entries** (new) — Document the
+  withdrawal-grievance threshold/decay; both Locke-only. The old
+  `environmentLandGovernmentReviewThreshold` entry is gone — Phase 6
   removed the key it documented (see the `sugarscape.py` entry above).
-  *Design choice — documentation; see `voteLandUse` / `voteRedistribution` / `doGovernanceReview` above.*
+  The `environmentLandUseChoices` entry is also gone — its land-use vote
+  was deleted along with the toll/`"closed"` concept.
+  *Design choice — documentation; see `voteRedistribution` / `doGovernanceReview` above.*
+- **`environmentLandGovernmentCostWeight` / `environmentLandOwnerCountCostWeight`
+  / `environmentLandReparationRateCostWeight` /
+  `environmentLandRestrainedCostWeight` entries** (new) — Document the
+  four additive weighted terms of `findEthicalValueOfCell`'s expected-cost
+  formula; all Locke-only.
+  *Design choice — documentation; see `findExpectedViolationCost` above.*
 - **`environmentLandLegislativeReviewInterval` entry** (new) — Documents
   the timestep interval between mandatory full legislative reconvenings
   (`reviewLegislature`/`reviewRedistribution`/`reviewExecutor`/
@@ -1362,13 +1329,14 @@ A standalone, runnable example scenario for the `locke` decision model, with
 its own `__README__` summary field. Notable settings distinct from the main
 `config.json`: `agentInheritancePolicy: "children"`,
 `environmentLandDecayTimesteps: 10`, `environmentLandTrustThresholdRange: [1, 2]`,
-and the reparation / land-use / levy-fraction-choices / grievance / executor /
-legislature-review-interval / legislature-grievance keys set to the same values
-as the main config (`environmentLandLegislativeReviewInterval: 10`,
+and the reparation / levy-fraction-choices / grievance / executor /
+legislature-review-interval / legislature-grievance / expected-cost-weight
+keys set to the same values as the main config
+(`environmentLandLegislativeReviewInterval: 10`,
 `environmentLandLegislatureGrievancePenalty: 0.5`,
 `environmentLandLegislatureGrievanceThreshold: 6.0`,
 `environmentLandLevyFractionChoices: [0.1, 0.3, 0.5, 0.7, 0.9]`) so the full
-governance machinery, including the seventh founding vote and the third
+governance machinery, including the levy-fraction founding vote and the third
 grievance channel, is exercised when the example is run.
 
 *Design choice — a runnable scenario file, not a textual claim.*
